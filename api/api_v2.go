@@ -9,18 +9,6 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
 )
 
-type V2Gateway struct {
-	Name  string `json:"name"`
-	URL   string `json:"url"`
-	Type  string `json:"type"`
-	Token string `json:"token"`
-}
-
-type V2Config struct {
-	Gateways   []*V2Gateway `json:"gateways"`
-	IceServers []string     `json:"ice_servers"` // TODO: implement
-}
-
 func (a *App) V2GetConfig(w http.ResponseWriter, r *http.Request) {
 	gateways := a.cache.gateways.Values()
 	config := V2Config{
