@@ -106,15 +106,15 @@ func AuthenticationMiddleware(tokenVerifier *oidc.IDTokenVerifier, gwPwd func(st
 				return
 			}
 
-			var claims *IDTokenClaims
-			if err := token.Claims(claims); err != nil {
+			var claims IDTokenClaims
+			if err := token.Claims(&claims); err != nil {
 				httputil.NewBadRequestError(err, "malformed JWT claims").Abort(w, r)
 				return
 			}
 
 			rCtx, ok := ContextFromRequest(r)
 			if ok {
-				rCtx.IDClaims = claims
+				rCtx.IDClaims = &claims
 			}
 
 			next.ServeHTTP(w, r)

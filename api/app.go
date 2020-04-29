@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/coreos/go-oidc"
-	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
+	"github.com/rs/cors"
 	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/sqlboiler/boil"
 
@@ -65,13 +65,6 @@ func (a *App) InitializeWithDB(db DBInterface, accountsUrl string, skipAuth, ski
 		log.Fatal().Err(err).Msg("initialize app cache")
 	}
 
-	a.sessionManager = NewV1SessionManager(a.DB, a.cache)
-
-	headersOk := handlers.AllowedHeaders([]string{"X-Requested-With", "Content-Type", "Content-Length", "Accept-Encoding", "Content-Range", "Content-Disposition", "Authorization"})
-	originsOk := handlers.AllowedOrigins([]string{"*"})
-	methodsOk := handlers.AllowedMethods([]string{"GET", "DELETE", "POST", "PUT", "OPTIONS"})
-	cors := handlers.CORS(originsOk, headersOk, methodsOk)
-
 	// this is declared here to abstract away the cache from auth middleware
 	gatewayPwd := func(name string) (string, bool) {
 		g, ok := a.cache.gateways.ByName(name)
@@ -81,12 +74,29 @@ func (a *App) InitializeWithDB(db DBInterface, accountsUrl string, skipAuth, ski
 		return "", false
 	}
 
+	a.sessionManager = NewV1SessionManager(a.DB, a.cache)
+
+	corsMiddleware := cors.New(cors.Options{
+		AllowedOrigins:   []string{"https://galaxy.kli.one", "http://localhost:3000"}, // TODO: config ?
+		AllowCredentials: true,
+		AllowedMethods: []string{
+			http.MethodHead,
+			http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodPatch,
+			http.MethodDelete,
+		},
+		AllowedHeaders: []string{"Origin", "Accept", "Content-Type", "X-Requested-With", "Authorization"},
+	})
+
 	a.Handler = middleware.ContextMiddleware(
 		middleware.LoggingMiddleware(
 			middleware.RecoveryMiddleware(
 				middleware.RealIPMiddleware(
-					middleware.AuthenticationMiddleware(a.tokenVerifier, gatewayPwd, skipAuth, skipEventsAuth)(
-						cors(a.Router))))))
+					corsMiddleware.Handler(
+						middleware.AuthenticationMiddleware(a.tokenVerifier, gatewayPwd, skipAuth, skipEventsAuth)(
+							a.Router))))))
 }
 
 func (a *App) Run(listenAddr string) {
@@ -118,15 +128,5 @@ func (a *App) initializeRoutes() {
 	a.Router.HandleFunc("/protocol", a.V1HandleProtocol).Methods("POST")
 
 	// api v2 (next)
-	//a.Router.HandleFunc("/groups", a.getGroups).Methods("GET")
-	//a.Router.HandleFunc("/rooms", a.getRooms).Methods("GET") 	 			// Current
-	//a.Router.HandleFunc("/room/{id}", a.getRoom).Methods("GET")			// Current
-	//a.Router.HandleFunc("/room/{id}", a.postRoom).Methods("PUT")
-	//a.Router.HandleFunc("/room/{id}", a.deleteRoom).Methods("DELETE")
-	//a.Router.HandleFunc("/users", a.getUsers).Methods("GET")				// Current
-	//a.Router.HandleFunc("/user", a.postUser).Methods("PUT")
-	//a.Router.HandleFunc("/user/{id}", a.getUser).Methods("GET")
-	//a.Router.HandleFunc("/user/{id}", a.deleteUser).Methods("DELETE")
-	//a.Router.HandleFunc("/qids/{id}", a.getQuad).Methods("GET")							// Current
-	//a.Router.HandleFunc("/qids/{id}", a.putQuad).Methods("PUT")							// Current
+	a.Router.HandleFunc("/v2/config", a.V2GetConfig).Methods("GET")
 }
