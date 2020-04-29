@@ -11,6 +11,7 @@ import (
 	pkgerr "github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
 )
 
@@ -58,11 +59,11 @@ func (c *IDTokenClaims) HasRole(role string) bool {
 	return ok
 }
 
-func AuthenticationMiddleware(tokenVerifier *oidc.IDTokenVerifier, gwPwd func(string) (string, bool), skipApi, skipGateway bool) func(http.Handler) http.Handler {
+func AuthenticationMiddleware(tokenVerifier *oidc.IDTokenVerifier, gwPwd func(string) (string, bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/event" || r.URL.Path == "/protocol" {
-				if skipGateway {
+				if config.Config.SkipEventsAuth {
 					next.ServeHTTP(w, r)
 					return
 				} else {
@@ -89,7 +90,7 @@ func AuthenticationMiddleware(tokenVerifier *oidc.IDTokenVerifier, gwPwd func(st
 			}
 
 			// APIs are using JWT
-			if skipApi {
+			if config.Config.SkipAuth {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Bnei-Baruch/gxydb-api/models"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil"
 )
@@ -30,8 +31,9 @@ type ApiTestSuite struct {
 
 func (s *ApiTestSuite) SetupSuite() {
 	s.Require().NoError(s.InitTestDB())
+	config.Config.SkipAuth = true
 	s.app = new(App)
-	s.app.InitializeWithDB(s.DB, "", true, false)
+	s.app.InitializeWithDB(s.DB)
 }
 
 func (s *ApiTestSuite) TearDownSuite() {

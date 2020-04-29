@@ -10,8 +10,8 @@ type V2Gateway struct {
 }
 
 type V2Config struct {
-	Gateways   []*V2Gateway `json:"gateways"`
-	IceServers []string     `json:"ice_servers"` // TODO: implement
+	Gateways   map[string]map[string]*V2Gateway `json:"gateways"`
+	IceServers map[string][]string              `json:"ice_servers"`
 }
 
 type V1User struct {

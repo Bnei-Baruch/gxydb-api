@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/sqlboiler/boil"
 
+	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/middleware"
 )
 
@@ -40,24 +41,24 @@ func (a *App) initOidc(issuer string) {
 	})
 }
 
-func (a *App) Initialize(dbUrl, accountsUrl string, skipAuth, skipEventsAuth bool) {
+func (a *App) Initialize() {
 	log.Info().Msg("initializing app")
-	db, err := sql.Open("postgres", dbUrl)
+	db, err := sql.Open("postgres", config.Config.DBUrl)
 	if err != nil {
 		log.Fatal().Err(err).Msg("sql.Open")
 	}
 
-	a.InitializeWithDB(db, accountsUrl, skipAuth, skipEventsAuth)
+	a.InitializeWithDB(db)
 }
 
-func (a *App) InitializeWithDB(db DBInterface, accountsUrl string, skipAuth, skipEventsAuth bool) {
+func (a *App) InitializeWithDB(db DBInterface) {
 	a.DB = db
 
 	a.Router = mux.NewRouter()
 	a.initializeRoutes()
 
-	if !skipAuth {
-		a.initOidc(accountsUrl)
+	if !config.Config.SkipAuth {
+		a.initOidc(config.Config.AccountsUrl)
 	}
 
 	a.cache = new(AppCache)
@@ -77,8 +78,7 @@ func (a *App) InitializeWithDB(db DBInterface, accountsUrl string, skipAuth, ski
 	a.sessionManager = NewV1SessionManager(a.DB, a.cache)
 
 	corsMiddleware := cors.New(cors.Options{
-		AllowedOrigins:   []string{"https://galaxy.kli.one", "http://localhost:3000"}, // TODO: config ?
-		AllowCredentials: true,
+		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{
 			http.MethodHead,
 			http.MethodGet,
@@ -95,16 +95,12 @@ func (a *App) InitializeWithDB(db DBInterface, accountsUrl string, skipAuth, ski
 			middleware.RecoveryMiddleware(
 				middleware.RealIPMiddleware(
 					corsMiddleware.Handler(
-						middleware.AuthenticationMiddleware(a.tokenVerifier, gatewayPwd, skipAuth, skipEventsAuth)(
+						middleware.AuthenticationMiddleware(a.tokenVerifier, gatewayPwd)(
 							a.Router))))))
 }
 
-func (a *App) Run(listenAddr string) {
-	addr := listenAddr
-	if addr == "" {
-		addr = ":8080"
-	}
-
+func (a *App) Run() {
+	addr := config.Config.ListenAddress
 	log.Info().Msgf("app run %s", addr)
 	if err := http.ListenAndServe(addr, a.Handler); err != nil {
 		log.Fatal().Err(err).Msg("http.ListenAndServe")
