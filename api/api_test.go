@@ -8,17 +8,20 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
+	"github.com/coreos/go-oidc"
 	"github.com/edoshor/janus-go"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/volatiletech/null"
 	"github.com/volatiletech/sqlboiler/boil"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Bnei-Baruch/gxydb-api/models"
-	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil"
 )
@@ -26,14 +29,15 @@ import (
 type ApiTestSuite struct {
 	suite.Suite
 	testutil.TestDBManager
-	app *App
+	app           *App
+	tokenVerifier *testutil.OIDCTokenVerifier
 }
 
 func (s *ApiTestSuite) SetupSuite() {
 	s.Require().NoError(s.InitTestDB())
-	config.Config.SkipAuth = true
+	s.tokenVerifier = new(testutil.OIDCTokenVerifier)
 	s.app = new(App)
-	s.app.InitializeWithDB(s.DB)
+	s.app.InitializeWithDeps(s.DB, s.tokenVerifier)
 }
 
 func (s *ApiTestSuite) TearDownSuite() {
@@ -45,6 +49,9 @@ func (s *ApiTestSuite) SetupTest() {
 }
 
 func (s *ApiTestSuite) TearDownTest() {
+	s.tokenVerifier.AssertExpectations(s.T())
+	s.tokenVerifier.ExpectedCalls = nil
+	s.tokenVerifier.Calls = nil
 	s.DBCleaner.Clean(s.AllTables()...)
 }
 
@@ -70,6 +77,7 @@ func (s *ApiTestSuite) TestListGroups() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", "/groups", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	respRooms, ok := body["rooms"].([]interface{})
 	s.Require().True(ok, "rooms is array")
@@ -89,12 +97,14 @@ func (s *ApiTestSuite) TestListGroups() {
 
 func (s *ApiTestSuite) TestCreateGroupMalformedID() {
 	req, _ := http.NewRequest("PUT", "/group/id", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
 
 func (s *ApiTestSuite) TestCreateGroupBadJSON() {
 	req, _ := http.NewRequest("PUT", "/group/1234", bytes.NewBuffer([]byte("{\"bad\":\"json")))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -108,6 +118,7 @@ func (s *ApiTestSuite) TestCreateGroupUnknownGateway() {
 
 	b, _ := json.Marshal(roomInfo)
 	req, _ := http.NewRequest("PUT", "/group/1234", bytes.NewBuffer(b))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -124,10 +135,12 @@ func (s *ApiTestSuite) TestCreateGroup() {
 
 	b, _ := json.Marshal(roomInfo)
 	req, _ := http.NewRequest("PUT", "/group/1234", bytes.NewBuffer(b))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusOK, resp.Code)
 
 	req, _ = http.NewRequest("GET", "/groups", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	respRooms, ok := body["rooms"].([]interface{})
 	s.Require().True(ok, "rooms is array")
@@ -151,10 +164,12 @@ func (s *ApiTestSuite) TestCreateGroupExiting() {
 
 	b, _ := json.Marshal(roomInfo)
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/group/%d", roomInfo.Room), bytes.NewBuffer(b))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusOK, resp.Code)
 
 	req, _ = http.NewRequest("GET", "/groups", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	respRooms, ok := body["rooms"].([]interface{})
 	s.Require().True(ok, "rooms is array")
@@ -167,12 +182,14 @@ func (s *ApiTestSuite) TestCreateGroupExiting() {
 
 func (s *ApiTestSuite) TestGetRoomMalformedID() {
 	req, _ := http.NewRequest("GET", "/room/id", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
 
 func (s *ApiTestSuite) TestGetRoomNotFound() {
 	req, _ := http.NewRequest("GET", "/room/1", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 
@@ -183,6 +200,7 @@ func (s *ApiTestSuite) TestGetRoomNotFound() {
 	_, err := room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled))
 	s.Require().NoError(err)
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	s.apiAuth(req)
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 
@@ -192,6 +210,7 @@ func (s *ApiTestSuite) TestGetRoomNotFound() {
 	_, err = room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled, models.RoomColumns.RemovedAt))
 	s.Require().NoError(err)
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	s.apiAuth(req)
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 }
@@ -208,6 +227,7 @@ func (s *ApiTestSuite) TestGetRoom() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 
 	// verify room's attributes
@@ -281,6 +301,7 @@ func (s *ApiTestSuite) TestListRooms() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", "/rooms", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusOK, resp.Code)
 
@@ -322,6 +343,7 @@ func (s *ApiTestSuite) TestListRoomsIsSorted() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", "/rooms", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusOK, resp.Code)
 
@@ -368,18 +390,21 @@ func (s *ApiTestSuite) TestListRoomsIsSorted() {
 
 func (s *ApiTestSuite) TestGetUserMalformedID() {
 	req, _ := http.NewRequest("GET", "/users/1234567890123456789012345678901234567890", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
 
 func (s *ApiTestSuite) TestGetUserNotFound() {
 	req, _ := http.NewRequest("GET", "/users/1", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 
 	// existing user without active session
 	user := s.createUser()
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 
@@ -407,6 +432,7 @@ func (s *ApiTestSuite) TestGetUser() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1Session(session, body)
 
@@ -458,6 +484,7 @@ func (s *ApiTestSuite) TestListUsers() {
 	}
 
 	req, _ := http.NewRequest("GET", "/users", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 
 	s.Equal(counts.gateways*counts.roomPerGateway*counts.sessionsPerRoom, len(body), "user count")
@@ -472,12 +499,14 @@ func (s *ApiTestSuite) TestListUsers() {
 
 func (s *ApiTestSuite) TestUpdateSessionMalformedID() {
 	req, _ := http.NewRequest("PUT", "/users/1234567890123456789012345678901234567890", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
 
 func (s *ApiTestSuite) TestUpdateSessionBadJSON() {
 	req, _ := http.NewRequest("PUT", "/users/12345678901234567890", bytes.NewBuffer([]byte("{\"bad\":\"json")))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -490,6 +519,7 @@ func (s *ApiTestSuite) TestUpdateSessionUnknownGateway() {
 	payloadJson, _ := json.Marshal(v1User)
 
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/users/%s", user.AccountsID), bytes.NewBuffer(payloadJson))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -503,6 +533,7 @@ func (s *ApiTestSuite) TestUpdateSessionUnknownRoom() {
 	payloadJson, _ := json.Marshal(v1User)
 
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/users/%s", user.AccountsID), bytes.NewBuffer(payloadJson))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -516,8 +547,10 @@ func (s *ApiTestSuite) TestUpdateSession() {
 	v1User := s.makeV1user(gateway, room, user)
 	payloadJson, _ := json.Marshal(v1User)
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/users/%s", user.AccountsID), bytes.NewBuffer(payloadJson))
+	s.apiAuth(req)
 	s.request200json(req)
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -525,20 +558,24 @@ func (s *ApiTestSuite) TestUpdateSession() {
 	v1User.Camera = true
 	payloadJson, _ = json.Marshal(v1User)
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/users/%s", user.AccountsID), bytes.NewBuffer(payloadJson))
+	s.apiAuth(req)
 	s.request200json(req)
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
 }
 
 func (s *ApiTestSuite) TestGetCompositeMalformedID() {
 	req, _ := http.NewRequest("GET", "/qids/12345678901234567890", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
 
 func (s *ApiTestSuite) TestGetCompositeNotFound() {
 	req, _ := http.NewRequest("GET", "/qids/q1", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 }
@@ -561,6 +598,7 @@ func (s *ApiTestSuite) TestGetComposite() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	vquad, ok := body["vquad"]
 	s.Require().True(ok, "vquad")
@@ -639,6 +677,7 @@ func (s *ApiTestSuite) TestListComposites() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", "/qids", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 
 	s.Equal(4, len(body), "composites count")
@@ -681,6 +720,7 @@ func (s *ApiTestSuite) TestListComposites() {
 
 func (s *ApiTestSuite) TestUpdateCompositeMalformedID() {
 	req, _ := http.NewRequest("PUT", "/qids/12345678901234567890", nil)
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -688,12 +728,14 @@ func (s *ApiTestSuite) TestUpdateCompositeMalformedID() {
 func (s *ApiTestSuite) TestUpdateCompositeNotFound() {
 	b, _ := json.Marshal(V1Composite{})
 	req, _ := http.NewRequest("PUT", "/qids/q1", bytes.NewBuffer(b))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
 }
 
 func (s *ApiTestSuite) TestUpdateCompositeBadJSON() {
 	req, _ := http.NewRequest("PUT", "/qids/q1", bytes.NewBuffer([]byte("{\"bad\":\"json")))
+	s.apiAuth(req)
 	resp := s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
 }
@@ -708,6 +750,7 @@ func (s *ApiTestSuite) TestUpdateComposite() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 
 	rooms[0] = s.createRoom(gateway)
@@ -717,10 +760,12 @@ func (s *ApiTestSuite) TestUpdateComposite() {
 	body["vquad"].([]interface{})[0].(map[string]interface{})["queue"] = 5
 	b, _ := json.Marshal(body)
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/qids/%s", composite.Name), bytes.NewBuffer(b))
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.Equal("success", body["result"], "PUT result")
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	vquad, ok := body["vquad"]
 	s.Require().True(ok, "vquad")
@@ -747,10 +792,12 @@ func (s *ApiTestSuite) TestUpdateCompositeClear() {
 	composite := s.createComposite(rooms)
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 	req, _ := http.NewRequest("PUT", fmt.Sprintf("/qids/%s", composite.Name), bytes.NewBuffer([]byte("{\"vquad\":[]}")))
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.Equal("success", body["result"], "PUT result")
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	vquad, ok := body["vquad"]
 	s.Require().True(ok, "vquad")
@@ -769,6 +816,7 @@ func (s *ApiTestSuite) TestUpdateCompositeDuplicateRoom() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	req, _ := http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	bodyArr := body["vquad"].([]interface{})
 	for i := 0; i < 4; i++ {
@@ -777,10 +825,12 @@ func (s *ApiTestSuite) TestUpdateCompositeDuplicateRoom() {
 	}
 	b, _ := json.Marshal(body)
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/qids/%s", composite.Name), bytes.NewBuffer(b))
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.Equal("success", body["result"], "PUT result")
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/qids/%s", composite.Name), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	vquad, ok := body["vquad"]
 	s.Require().True(ok, "vquad")
@@ -796,6 +846,28 @@ func (s *ApiTestSuite) TestUpdateCompositeDuplicateRoom() {
 		s.False(croom["questions"].(bool), "questions")
 		s.Equal(0, int(croom["num_users"].(float64)), "num_users")
 	}
+}
+
+func (s *ApiTestSuite) TestHandleApiUnauthorized() {
+	req, _ := http.NewRequest("GET", "/v2/config", nil)
+	resp := s.request(req)
+	s.Equal(http.StatusUnauthorized, resp.Code, "no header")
+
+	req.SetBasicAuth("", "")
+	resp = s.request(req)
+	s.Equal(http.StatusUnauthorized, resp.Code, "no username password")
+
+	req.SetBasicAuth("username", "")
+	resp = s.request(req)
+	s.Equal(http.StatusUnauthorized, resp.Code, "no password")
+
+	req.SetBasicAuth("", "password")
+	resp = s.request(req)
+	s.Equal(http.StatusUnauthorized, resp.Code, "no username")
+
+	req.SetBasicAuth("username", "password")
+	resp = s.request(req)
+	s.Equal(http.StatusUnauthorized, resp.Code, "wrong username password")
 }
 
 func (s *ApiTestSuite) TestHandleGatewayUnauthorized() {
@@ -1053,6 +1125,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnter() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 }
@@ -1091,6 +1164,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnterUnknownUser() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", "/users/some_new_user_id", nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 }
@@ -1129,6 +1203,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnterExistingSession() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1170,6 +1245,7 @@ func (s *ApiTestSuite) TestHandleProtocolQuestion() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1187,6 +1263,7 @@ func (s *ApiTestSuite) TestHandleProtocolQuestion() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1228,6 +1305,7 @@ func (s *ApiTestSuite) TestHandleProtocolCamera() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1245,6 +1323,7 @@ func (s *ApiTestSuite) TestHandleProtocolCamera() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1286,6 +1365,7 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1303,6 +1383,7 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 	s.request200json(req)
 
 	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
 
@@ -1322,6 +1403,29 @@ func (s *ApiTestSuite) request200json(req *http.Request) map[string]interface{} 
 	var body map[string]interface{}
 	s.Require().NoError(json.Unmarshal(resp.Body.Bytes(), &body))
 	return body
+}
+
+func (s *ApiTestSuite) apiAuth(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer token")
+
+	oidcIDToken := &oidc.IDToken{
+		Issuer:          "https://test.issuer",
+		Audience:        []string{"Audience"},
+		Subject:         "Subject",
+		Expiry:          time.Now().Add(10 * time.Minute),
+		IssuedAt:        time.Now(),
+		Nonce:           "nonce",
+		AccessTokenHash: "access_token_hash",
+	}
+
+	pointerVal := reflect.ValueOf(oidcIDToken)
+	val := reflect.Indirect(pointerVal)
+	member := val.FieldByName("claims")
+	ptrToY := unsafe.Pointer(member.UnsafeAddr())
+	realPtrToY := (*[]byte)(ptrToY)
+	*realPtrToY = []byte("{}")
+
+	s.tokenVerifier.On("Verify", mock.Anything, "token").Return(oidcIDToken, nil)
 }
 
 func (s *ApiTestSuite) assertV1Session(session *models.Session, actual map[string]interface{}) {

@@ -59,42 +59,73 @@ func (c *IDTokenClaims) HasRole(role string) bool {
 	return ok
 }
 
-func AuthenticationMiddleware(tokenVerifier *oidc.IDTokenVerifier, gwPwd func(string) (string, bool)) func(http.Handler) http.Handler {
+type OIDCTokenVerifier interface {
+	Verify(context.Context, string) (*oidc.IDToken, error)
+}
+
+func AuthenticationMiddleware(tokenVerifier OIDCTokenVerifier, gwPwd func(string) (string, bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+			// gateways are using basic auth
 			if r.URL.Path == "/event" || r.URL.Path == "/protocol" {
 				if config.Config.SkipEventsAuth {
 					next.ServeHTTP(w, r)
 					return
-				} else {
-					username, password, ok := r.BasicAuth()
-					if !ok {
-						httputil.NewUnauthorizedError(pkgerr.Errorf("no `Authorization` header set")).Abort(w, r)
-						return
-					}
+				}
 
-					hPwd, ok := gwPwd(username)
-					if !ok {
-						httputil.NewUnauthorizedError(pkgerr.Errorf("unknown gateway: %s", username)).Abort(w, r)
-						return
-					}
-
-					if err := bcrypt.CompareHashAndPassword([]byte(hPwd), []byte(password)); err != nil {
-						httputil.NewUnauthorizedError(pkgerr.Errorf("wrong password: %s", password)).Abort(w, r)
-						return
-					}
-
-					next.ServeHTTP(w, r)
+				username, password, ok := r.BasicAuth()
+				if !ok {
+					httputil.NewUnauthorizedError(pkgerr.Errorf("no `Authorization` header set")).Abort(w, r)
 					return
 				}
+
+				hPwd, ok := gwPwd(username)
+				if !ok {
+					httputil.NewUnauthorizedError(pkgerr.Errorf("unknown gateway: %s", username)).Abort(w, r)
+					return
+				}
+
+				if err := bcrypt.CompareHashAndPassword([]byte(hPwd), []byte(password)); err != nil {
+					httputil.NewUnauthorizedError(pkgerr.Errorf("wrong password: %s", password)).Abort(w, r)
+					return
+				}
+
+				next.ServeHTTP(w, r)
+				return
 			}
 
-			// APIs are using JWT
+			// APIs are using a mix of JWT and basic auth
 			if config.Config.SkipAuth {
 				next.ServeHTTP(w, r)
 				return
 			}
 
+			// service users are using basic auth
+			if username, password, ok := r.BasicAuth(); ok {
+				if username != "service" { // TODO: change me ?!
+					httputil.NewUnauthorizedError(pkgerr.Errorf("unknown username: %s", username)).Abort(w, r)
+					return
+				}
+
+				success := false
+				for _, pwd := range config.Config.ServicePasswords {
+					if err := bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)); err == nil {
+						success = true
+						break
+					}
+				}
+
+				if !success {
+					httputil.NewUnauthorizedError(pkgerr.Errorf("wrong password: %s", password)).Abort(w, r)
+					return
+				}
+
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// accounts service users are using JWT
 			auth := parseToken(r)
 			if auth == "" {
 				httputil.NewUnauthorizedError(pkgerr.Errorf("no `Authorization` header set")).Abort(w, r)

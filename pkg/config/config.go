@@ -6,22 +6,24 @@ import (
 )
 
 type config struct {
-	ListenAddress  string
-	DBUrl          string
-	AccountsUrl    string
-	SkipAuth       bool
-	SkipEventsAuth bool
-	IceServers     map[string][]string
+	ListenAddress    string
+	DBUrl            string
+	AccountsUrl      string
+	SkipAuth         bool
+	SkipEventsAuth   bool
+	IceServers       map[string][]string
+	ServicePasswords []string
 }
 
 func newConfig() *config {
 	return &config{
-		ListenAddress:  ":8081",
-		DBUrl:          "postgres://user:password@localhost/galaxy?sslmode=disable",
-		AccountsUrl:    "https://accounts.kbb1.com/auth/realms/main",
-		SkipAuth:       false,
-		SkipEventsAuth: false,
-		IceServers:     make(map[string][]string),
+		ListenAddress:    ":8081",
+		DBUrl:            "postgres://user:password@localhost/galaxy?sslmode=disable",
+		AccountsUrl:      "https://accounts.kbb1.com/auth/realms/main",
+		SkipAuth:         false,
+		SkipEventsAuth:   false,
+		IceServers:       make(map[string][]string),
+		ServicePasswords: make([]string, 0),
 	}
 }
 
@@ -50,5 +52,8 @@ func Init() {
 	}
 	if val := os.Getenv("ICE_SERVERS_STREAMING"); val != "" {
 		Config.IceServers["streaming"] = strings.Split(val, ",")
+	}
+	if val := os.Getenv("SERVICE_PASSWORDS"); val != "" {
+		Config.ServicePasswords = strings.Split(val, ",")
 	}
 }

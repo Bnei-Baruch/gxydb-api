@@ -25,41 +25,42 @@ type App struct {
 	Router         *mux.Router
 	Handler        http.Handler
 	DB             DBInterface
-	tokenVerifier  *oidc.IDTokenVerifier
 	cache          *AppCache
 	sessionManager SessionManager
 }
 
-func (a *App) initOidc(issuer string) {
-	oidcProvider, err := oidc.NewProvider(context.TODO(), issuer)
+func (a *App) initOidc(issuer string) middleware.OIDCTokenVerifier {
+	provider, err := oidc.NewProvider(context.TODO(), issuer)
 	if err != nil {
 		log.Fatal().Err(err).Msg("oidc.NewProvider")
 	}
 
-	a.tokenVerifier = oidcProvider.Verifier(&oidc.Config{
+	return provider.Verifier(&oidc.Config{
 		SkipClientIDCheck: true,
 	})
 }
 
 func (a *App) Initialize() {
 	log.Info().Msg("initializing app")
+
 	db, err := sql.Open("postgres", config.Config.DBUrl)
 	if err != nil {
 		log.Fatal().Err(err).Msg("sql.Open")
 	}
 
-	a.InitializeWithDB(db)
+	var tokenVerifier middleware.OIDCTokenVerifier
+	if !config.Config.SkipAuth {
+		tokenVerifier = a.initOidc(config.Config.AccountsUrl)
+	}
+
+	a.InitializeWithDeps(db, tokenVerifier)
 }
 
-func (a *App) InitializeWithDB(db DBInterface) {
+func (a *App) InitializeWithDeps(db DBInterface, tokenVerifier middleware.OIDCTokenVerifier) {
 	a.DB = db
 
 	a.Router = mux.NewRouter()
 	a.initializeRoutes()
-
-	if !config.Config.SkipAuth {
-		a.initOidc(config.Config.AccountsUrl)
-	}
 
 	a.cache = new(AppCache)
 	if err := a.cache.Init(db); err != nil {
@@ -95,7 +96,7 @@ func (a *App) InitializeWithDB(db DBInterface) {
 			middleware.RecoveryMiddleware(
 				middleware.RealIPMiddleware(
 					corsMiddleware.Handler(
-						middleware.AuthenticationMiddleware(a.tokenVerifier, gatewayPwd)(
+						middleware.AuthenticationMiddleware(tokenVerifier, gatewayPwd)(
 							a.Router))))))
 }
 
