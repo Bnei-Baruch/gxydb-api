@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/subosito/gotenv"
 
-	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
+	"github.com/Bnei-Baruch/gxydb-api/common"
 )
 
 var rootCmd = &cobra.Command{
@@ -29,5 +29,5 @@ func Execute() {
 
 func initConfig() {
 	gotenv.Load()
-	config.Init()
+	common.Init()
 }

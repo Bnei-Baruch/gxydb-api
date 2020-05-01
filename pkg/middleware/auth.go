@@ -11,7 +11,7 @@ import (
 	pkgerr "github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
+	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
 )
 
@@ -69,7 +69,7 @@ func AuthenticationMiddleware(tokenVerifier OIDCTokenVerifier, gwPwd func(string
 
 			// gateways are using basic auth
 			if r.URL.Path == "/event" || r.URL.Path == "/protocol" {
-				if config.Config.SkipEventsAuth {
+				if common.Config.SkipEventsAuth {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -96,7 +96,7 @@ func AuthenticationMiddleware(tokenVerifier OIDCTokenVerifier, gwPwd func(string
 			}
 
 			// APIs are using a mix of JWT and basic auth
-			if config.Config.SkipAuth {
+			if common.Config.SkipAuth {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -109,7 +109,7 @@ func AuthenticationMiddleware(tokenVerifier OIDCTokenVerifier, gwPwd func(string
 				}
 
 				success := false
-				for _, pwd := range config.Config.ServicePasswords {
+				for _, pwd := range common.Config.ServicePasswords {
 					if err := bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)); err == nil {
 						success = true
 						break

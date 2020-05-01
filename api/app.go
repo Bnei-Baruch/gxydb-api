@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/sqlboiler/boil"
 
-	"github.com/Bnei-Baruch/gxydb-api/pkg/config"
+	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/middleware"
 )
 
@@ -43,14 +43,14 @@ func (a *App) initOidc(issuer string) middleware.OIDCTokenVerifier {
 func (a *App) Initialize() {
 	log.Info().Msg("initializing app")
 
-	db, err := sql.Open("postgres", config.Config.DBUrl)
+	db, err := sql.Open("postgres", common.Config.DBUrl)
 	if err != nil {
 		log.Fatal().Err(err).Msg("sql.Open")
 	}
 
 	var tokenVerifier middleware.OIDCTokenVerifier
-	if !config.Config.SkipAuth {
-		tokenVerifier = a.initOidc(config.Config.AccountsUrl)
+	if !common.Config.SkipAuth {
+		tokenVerifier = a.initOidc(common.Config.AccountsUrl)
 	}
 
 	a.InitializeWithDeps(db, tokenVerifier)
@@ -101,7 +101,7 @@ func (a *App) InitializeWithDeps(db DBInterface, tokenVerifier middleware.OIDCTo
 }
 
 func (a *App) Run() {
-	addr := config.Config.ListenAddress
+	addr := common.Config.ListenAddress
 	log.Info().Msgf("app run %s", addr)
 	if err := http.ListenAndServe(addr, a.Handler); err != nil {
 		log.Fatal().Err(err).Msg("http.ListenAndServe")

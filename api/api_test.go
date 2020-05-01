@@ -21,6 +21,7 @@ import (
 	"github.com/volatiletech/sqlboiler/boil"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil"
@@ -1391,6 +1392,45 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 	s.False(session.SoundTest, "sound-test false")
 }
 
+func (s *ApiTestSuite) TestV2GetConfig() {
+	roomsGateways := make(map[string]*models.Gateway)
+	streamingGateways := make(map[string]*models.Gateway)
+	for i := 0; i < 3; i++ {
+		gateway := s.createGateway()
+		roomsGateways[gateway.Name] = gateway
+		gateway = s.createGatewayP(common.GatewayTypeStreaming)
+		streamingGateways[gateway.Name] = gateway
+	}
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	req, _ := http.NewRequest("GET", "/v2/config", nil)
+	s.apiAuth(req)
+	body := s.request200json(req)
+
+	gateways := body["gateways"].(map[string]interface{})
+	for name, respGateway := range gateways[common.GatewayTypeRooms].(map[string]interface{}) {
+		gateway, ok := roomsGateways[name]
+		s.Require().True(ok, "unknown rooms gateway %s", name)
+		data := respGateway.(map[string]interface{})
+		s.Equal(gateway.Name, data["name"], "name")
+		s.Equal(gateway.URL, data["url"], "url")
+		s.Equal(gateway.Type, data["type"], "type")
+	}
+	for name, respGateway := range gateways[common.GatewayTypeStreaming].(map[string]interface{}) {
+		gateway, ok := streamingGateways[name]
+		s.Require().True(ok, "unknown rooms gateway %s", name)
+		data := respGateway.(map[string]interface{})
+		s.Equal(gateway.Name, data["name"], "name")
+		s.Equal(gateway.URL, data["url"], "url")
+		s.Equal(gateway.Type, data["type"], "type")
+	}
+
+	iceServers := body["ice_servers"].(map[string]interface{})
+
+	s.ElementsMatch(common.Config.IceServers[common.GatewayTypeRooms], iceServers[common.GatewayTypeRooms], "rooms ice servers")
+	s.ElementsMatch(common.Config.IceServers[common.GatewayTypeStreaming], iceServers[common.GatewayTypeStreaming], "streaming ice servers")
+}
+
 func (s *ApiTestSuite) request(req *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
 	s.app.Handler.ServeHTTP(rr, req)
@@ -1474,6 +1514,10 @@ func (s *ApiTestSuite) assertV1User(v1User *V1User, body map[string]interface{})
 }
 
 func (s *ApiTestSuite) createGateway() *models.Gateway {
+	return s.createGatewayP(common.GatewayTypeRooms)
+}
+
+func (s *ApiTestSuite) createGatewayP(gType string) *models.Gateway {
 	name := fmt.Sprintf("gateway_%s", stringutil.GenerateName(4))
 	pwdHash, err := bcrypt.GenerateFromPassword([]byte(name), bcrypt.MinCost)
 	s.Require().NoError(err)
@@ -1484,6 +1528,7 @@ func (s *ApiTestSuite) createGateway() *models.Gateway {
 		AdminURL:       "admin_url",
 		AdminPassword:  "admin_password",
 		EventsPassword: string(pwdHash),
+		Type:           gType,
 	}
 
 	s.Require().NoError(gateway.Insert(s.DB, boil.Infer()))
