@@ -1499,26 +1499,6 @@ func (s *ApiTestSuite) TestV2GetConfig() {
 	s.ElementsMatch(common.Config.IceServers[common.GatewayTypeStreaming], iceServers[common.GatewayTypeStreaming], "streaming ice servers")
 }
 
-func (s *ApiTestSuite) TestV2GetConfigWithAdmin() {
-	gateway := s.createGateway()
-	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
-
-	for _, role := range []string{common.RoleAdmin, common.RoleRoot} {
-		req, _ := http.NewRequest("GET", "/v2/config", nil)
-		s.apiAuthP(req, []string{role})
-		body := s.request200json(req)
-		gateways := body["gateways"].(map[string]interface{})
-		for _, respGateway := range gateways[common.GatewayTypeRooms].(map[string]interface{}) {
-			data := respGateway.(map[string]interface{})
-			s.Equal(gateway.Name, data["name"], "name")
-			s.Equal(gateway.URL, data["url"], "url")
-			s.Equal(gateway.Type, data["type"], "type")
-			s.Equal(gateway.AdminURL, data["admin_url"], "admin_url")
-			s.Equal(gateway.AdminPassword, data["admin_password"], "admin_password")
-		}
-	}
-}
-
 func (s *ApiTestSuite) request(req *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
 	s.app.Handler.ServeHTTP(rr, req)

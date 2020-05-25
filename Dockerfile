@@ -18,6 +18,8 @@ RUN apk update && \
 WORKDIR ${work_dir}
 COPY . .
 
+ENV SECRET=12345678901234567890123456789012
+
 RUN go test $(go list ./... | grep -v /models) \
     && go build
 

@@ -14,6 +14,7 @@ import (
 	"github.com/volatiletech/null"
 	"github.com/volatiletech/sqlboiler/boil"
 
+	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/errs"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
@@ -26,11 +27,11 @@ type SessionManager interface {
 }
 
 type V1SessionManager struct {
-	db    DBInterface
+	db    common.DBInterface
 	cache *AppCache
 }
 
-func NewV1SessionManager(db DBInterface, cache *AppCache) SessionManager {
+func NewV1SessionManager(db common.DBInterface, cache *AppCache) SessionManager {
 	return &V1SessionManager{
 		db:    db,
 		cache: cache,

@@ -11,7 +11,7 @@ require (
 	github.com/docker/docker v1.13.1 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
-	github.com/edoshor/janus-go v0.0.0-20200417022012-32c4225085f8
+	github.com/edoshor/janus-go v0.0.0-20200522001742-3fd22dec920b
 	github.com/friendsofgo/errors v0.9.2
 	github.com/go-sql-driver/mysql v1.5.0 // indirect
 	github.com/gofrs/uuid v3.2.0+incompatible // indirect
