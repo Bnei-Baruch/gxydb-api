@@ -6,10 +6,13 @@ LABEL maintainer="edoshor@gmail.com"
 
 ARG work_dir
 ARG db_url="postgres://user:password@host.docker.internal/galaxy?sslmode=disable"
+ARG test_gateway_admin_url="http://host.docker.internal:7088/admin"
 
 ENV GOOS=linux \
 	CGO_ENABLED=0 \
-	DB_URL=${db_url}
+	DB_URL=${db_url} \
+	TEST_GATEWAY_ADMIN_URL=${test_gateway_admin_url} \
+	SECRET=12345678901234567890123456789012
 
 RUN apk update && \
     apk add --no-cache \
@@ -17,8 +20,6 @@ RUN apk update && \
 
 WORKDIR ${work_dir}
 COPY . .
-
-ENV SECRET=12345678901234567890123456789012
 
 RUN go test $(go list ./... | grep -v /models) \
     && go build

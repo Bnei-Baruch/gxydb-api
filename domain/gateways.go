@@ -128,11 +128,14 @@ func (tm *GatewayTokensManager) rotateGatewayTokens(gateway *models.Gateway) err
 
 	// remove expired tokens
 	maxAgeTS := time.Now().UTC().Add(-tm.maxAge)
+	tokensToSave := make([]*GatewayToken, 0)
 	for _, token := range tokens {
 		if token.CreatedAt.Before(maxAgeTS) {
 			if err := tm.removeToken(gateway, token); err != nil {
 				log.Error().Err(err).Msgf("error removing token")
 			}
+		} else {
+			tokensToSave = append(tokensToSave, token)
 		}
 	}
 
@@ -141,10 +144,10 @@ func (tm *GatewayTokensManager) rotateGatewayTokens(gateway *models.Gateway) err
 	if err != nil {
 		return errors.WithMessage(err, "create token")
 	}
-	tokens = append(tokens, token)
+	tokensToSave = append(tokensToSave, token)
 
 	// update props in DB
-	props["tokens"] = tokens
+	props["tokens"] = tokensToSave
 	b, err := json.Marshal(props)
 	if err != nil {
 		return errors.Wrap(err, "json.Marshal props")
@@ -216,16 +219,16 @@ func (tm *GatewayTokensManager) removeToken(gateway *models.Gateway, token *Gate
 }
 
 type gatewayAdminAPIRegistry struct {
-	registry map[int64]*janus.AdminAPI
+	registry map[int64]janus.AdminAPI
 }
 
 func NewGatewayAdminAPIRegistry() *gatewayAdminAPIRegistry {
 	return &gatewayAdminAPIRegistry{
-		registry: make(map[int64]*janus.AdminAPI),
+		registry: make(map[int64]janus.AdminAPI),
 	}
 }
 
-func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (*janus.AdminAPI, error) {
+func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, error) {
 	if api, ok := r.registry[gateway.ID]; ok {
 		return api, nil
 	}
