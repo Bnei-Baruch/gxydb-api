@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/base64"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/edoshor/janus-go"
@@ -219,6 +220,7 @@ func (tm *GatewayTokensManager) removeToken(gateway *models.Gateway, token *Gate
 }
 
 type gatewayAdminAPIRegistry struct {
+	lock     sync.RWMutex
 	registry map[int64]janus.AdminAPI
 }
 
@@ -229,7 +231,7 @@ func NewGatewayAdminAPIRegistry() *gatewayAdminAPIRegistry {
 }
 
 func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, error) {
-	if api, ok := r.registry[gateway.ID]; ok {
+	if api, ok := r.Get(gateway); ok {
 		return api, nil
 	}
 
@@ -247,6 +249,19 @@ func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, 
 		return nil, errors.Wrap(err, "janus.NewAdminAPI")
 	}
 
-	r.registry[gateway.ID] = api
+	r.Set(gateway, api)
 	return api, nil
+}
+
+func (r *gatewayAdminAPIRegistry) Get(gateway *models.Gateway) (janus.AdminAPI, bool) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	api, ok := r.registry[gateway.ID]
+	return api, ok
+}
+
+func (r *gatewayAdminAPIRegistry) Set(gateway *models.Gateway, api janus.AdminAPI) {
+	r.lock.Lock()
+	r.registry[gateway.ID] = api
+	r.lock.Unlock()
 }
