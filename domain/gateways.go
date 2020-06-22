@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edoshor/janus-go"
+	janus_admin "github.com/edoshor/janus-go/admin"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/null"
@@ -221,16 +221,16 @@ func (tm *GatewayTokensManager) removeToken(gateway *models.Gateway, token *Gate
 
 type gatewayAdminAPIRegistry struct {
 	lock     sync.RWMutex
-	registry map[int64]janus.AdminAPI
+	registry map[int64]janus_admin.AdminAPI
 }
 
 func NewGatewayAdminAPIRegistry() *gatewayAdminAPIRegistry {
 	return &gatewayAdminAPIRegistry{
-		registry: make(map[int64]janus.AdminAPI),
+		registry: make(map[int64]janus_admin.AdminAPI),
 	}
 }
 
-func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, error) {
+func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus_admin.AdminAPI, error) {
 	if api, ok := r.Get(gateway); ok {
 		return api, nil
 	}
@@ -244,7 +244,7 @@ func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, 
 		return nil, pkgerr.Wrap(err, "decrypt admin password")
 	}
 
-	api, err := janus.NewAdminAPI(gateway.AdminURL, adminPwd)
+	api, err := janus_admin.NewAdminAPI(gateway.AdminURL, adminPwd)
 	if err != nil {
 		return nil, pkgerr.Wrap(err, "janus.NewAdminAPI")
 	}
@@ -253,14 +253,14 @@ func (r *gatewayAdminAPIRegistry) For(gateway *models.Gateway) (janus.AdminAPI, 
 	return api, nil
 }
 
-func (r *gatewayAdminAPIRegistry) Get(gateway *models.Gateway) (janus.AdminAPI, bool) {
+func (r *gatewayAdminAPIRegistry) Get(gateway *models.Gateway) (janus_admin.AdminAPI, bool) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	api, ok := r.registry[gateway.ID]
 	return api, ok
 }
 
-func (r *gatewayAdminAPIRegistry) Set(gateway *models.Gateway, api janus.AdminAPI) {
+func (r *gatewayAdminAPIRegistry) Set(gateway *models.Gateway, api janus_admin.AdminAPI) {
 	r.lock.Lock()
 	r.registry[gateway.ID] = api
 	r.lock.Unlock()

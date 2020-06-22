@@ -12,3 +12,6 @@ const RoleAdmin = "gxy_admin"
 const RoleRoot = "gxy_root"
 
 var AllRoles = []string{RoleGuest, RoleUser, RoleShidur, RoleSoundMan, RoleViewer, RoleAdmin, RoleRoot}
+
+const APIDefaultPageSize = 50
+const APIMaxPageSize = 1000
