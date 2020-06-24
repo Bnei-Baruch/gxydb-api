@@ -133,7 +133,7 @@ func (tm *GatewayTokensManager) syncAll() {
 		}
 	}
 	if notify {
-		tm.NotifyAll("GATEWAY_TOKENS_CHANGED")
+		tm.NotifyAll(common.EventGatewayTokensChanged)
 	}
 }
 
@@ -333,9 +333,9 @@ func (tm *GatewayTokensManager) rotateGatewayTokens(gateway *models.Gateway) err
 		if token.CreatedAt.Before(maxAgeTS) {
 			decToken, err := token.Decrypt()
 			if err != nil {
-				log.Error().Err(err).Msgf("decrypt token")
+				log.Error().Err(err).Msg("decrypt token")
 			} else if err := tm.removeToken(gateway, decToken); err != nil {
-				log.Error().Err(err).Msgf("error removing token")
+				log.Error().Err(err).Msg("error removing token")
 			}
 		} else {
 			tokensToSave = append(tokensToSave, token)

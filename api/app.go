@@ -129,7 +129,7 @@ func (a *App) Notify(event interface{}) {
 	case string:
 		log.Info().Msgf("processing %s", event)
 		switch event.(string) {
-		case "GATEWAY_TOKENS_CHANGED":
+		case common.EventGatewayTokensChanged:
 			if err := a.cache.gatewayTokens.Reload(a.DB); err != nil {
 				log.Error().Err(err).Msg("cache.gatewayTokens.Reload")
 			}
