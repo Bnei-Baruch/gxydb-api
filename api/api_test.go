@@ -16,6 +16,7 @@ import (
 
 	"github.com/coreos/go-oidc"
 	"github.com/edoshor/janus-go"
+	janus_admin "github.com/edoshor/janus-go/admin"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/volatiletech/null"
@@ -1477,9 +1478,12 @@ func (s *ApiTestSuite) TestV2GetConfig() {
 		domain.GatewayAdminAPIRegistry.Set(gateway, janusAdminAPI)
 	}
 
+	listTokensResponse := &janus_admin.ListTokensResponse{
+		Data: map[string][]*janus_admin.StoredToken{"tokens": {}},
+	}
+	janusAdminAPI.On("ListTokens", mock.Anything, mock.Anything).Return(listTokensResponse, nil)
 	janusAdminAPI.On("AddToken", mock.Anything, mock.Anything).Return(nil, nil)
-	err := domain.NewGatewayTokensManager(s.DB, 1).RotateAll()
-	s.Require().NoError(err, "tm.RotateAll")
+	domain.NewGatewayTokensManager(s.DB, 1).SyncAll()
 
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
