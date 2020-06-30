@@ -1526,8 +1526,16 @@ func (s *ApiTestSuite) request(req *http.Request) *httptest.ResponseRecorder {
 }
 
 func (s *ApiTestSuite) request200json(req *http.Request) map[string]interface{} {
+	return s.requestJson(req, http.StatusOK)
+}
+
+func (s *ApiTestSuite) request201json(req *http.Request) map[string]interface{} {
+	return s.requestJson(req, http.StatusCreated)
+}
+
+func (s *ApiTestSuite) requestJson(req *http.Request, statusCode int) map[string]interface{} {
 	resp := s.request(req)
-	s.Require().Equal(http.StatusOK, resp.Code)
+	s.Require().Equal(statusCode, resp.Code)
 	var body map[string]interface{}
 	s.Require().NoError(json.Unmarshal(resp.Body.Bytes(), &body))
 	return body

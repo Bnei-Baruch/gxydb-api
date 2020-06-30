@@ -1,14 +1,18 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	janus_admin "github.com/edoshor/janus-go/admin"
+	janus_plugins "github.com/edoshor/janus-go/plugins"
 	"github.com/gorilla/mux"
 	pkgerr "github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
+	"github.com/volatiletech/sqlboiler/boil"
 	"github.com/volatiletech/sqlboiler/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
@@ -17,6 +21,7 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/mathutil"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
 )
 
 func (a *App) AdminGatewaysHandleInfo(w http.ResponseWriter, r *http.Request) {
@@ -117,10 +122,131 @@ func (a *App) AdminListRooms(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	var data models.Room
+	if err := httputil.DecodeJSONBody(w, r, &data); err != nil {
+		err.Abort(w, r)
+		return
+	}
+	a.requestContext(r).Params = data
+
+	if data.GatewayUID <= 0 {
+		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
+		return
+	}
+
+	if _, ok := a.cache.gateways.ByID(data.DefaultGatewayID); !ok {
+		httputil.NewBadRequestError(nil, "gateway doesn't exists").Abort(w, r)
+		return
+	}
+
+	if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
+		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
+		return
+	}
+
+	if exists, _ := models.Rooms(models.RoomWhere.Name.EQ(data.Name)).Exists(a.DB); exists {
+		httputil.NewBadRequestError(nil, "room already exists [name]").Abort(w, r)
+		return
+	}
+
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+		// create room in DB
+		if err := data.Insert(a.DB, boil.Whitelist("name", "default_gateway_id", "gateway_uid", "disabled")); err != nil {
+			return pkgerr.WithStack(err)
+		}
+
+		// create room in gateways
+		room := &janus_plugins.VideoroomRoom{
+			Room:               data.GatewayUID,
+			Description:        data.Name,
+			Secret:             common.Config.GatewayRoomsSecret,
+			Publishers:         100,
+			Bitrate:            64000,
+			FirFreq:            10,
+			AudioCodec:         "opus",
+			VideoCodec:         "h264",
+			AudioLevelExt:      true,
+			AudioLevelEvent:    true,
+			AudioActivePackets: 25,
+			AudioLevelAverage:  100,
+			VideoOrientExt:     true,
+			PlayoutDelayExt:    true,
+			TransportWideCCExt: true,
+		}
+		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayVideoroomAdminKey).
+			CreateRequest(room, true, []string{})
+
+		for _, gateway := range a.cache.gateways.Values() {
+			if gateway.Type != common.GatewayTypeRooms {
+				continue
+			}
+
+			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
+			if err != nil {
+				return pkgerr.WithMessage(err, "Admin API for gateway")
+			}
+
+			if _, err = api.MessagePlugin(request); err != nil {
+				return pkgerr.Wrap(err, "api.MessagePlugin")
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		var hErr *httputil.HttpError
+		if errors.As(err, &hErr) {
+			hErr.Abort(w, r)
+		} else {
+			httputil.NewInternalError(err).Abort(w, r)
+		}
+		return
+	}
+
+	if err := a.cache.rooms.Reload(a.DB); err != nil {
+		log.Error().Err(err).Msg("Reload cache")
+	}
+
+	httputil.RespondWithJSON(w, http.StatusCreated, data)
+}
+
+func (a *App) AdminGetRoom(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		httputil.NewNotFoundError().Abort(w, r)
+		return
+	}
+
+	room, err := models.FindRoom(a.DB, int64(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NewNotFoundError().Abort(w, r)
+		} else {
+			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		}
+		return
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, room)
+}
+
 type ListParams struct {
-	PageNumber int    `json:"page_no" form:"page_no" binding:"omitempty,min=1"`
-	PageSize   int    `json:"page_size" form:"page_size" binding:"omitempty,min=1"`
-	OrderBy    string `json:"order_by" form:"order_by" binding:"omitempty"`
+	PageNumber int    `json:"page_no"`
+	PageSize   int    `json:"page_size"`
+	OrderBy    string `json:"order_by"`
 	GroupBy    string `json:"-"`
 }
 

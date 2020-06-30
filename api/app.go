@@ -162,8 +162,8 @@ func (a *App) initializeRoutes() {
 	a.Router.HandleFunc("/admin/gateways/{gateway_id}/sessions/{session_id}/handles/{handle_id}/info", a.AdminGatewaysHandleInfo).Methods("GET")
 
 	a.Router.HandleFunc("/admin/rooms", a.AdminListRooms).Methods("GET")
-	//a.Router.HandleFunc("/admin/rooms", a.AdminCreateRoom).Methods("POST")
-	//a.Router.HandleFunc("/admin/rooms/{id}", a.AdminGetRoom).Methods("GET")
+	a.Router.HandleFunc("/admin/rooms", a.AdminCreateRoom).Methods("POST")
+	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminGetRoom).Methods("GET")
 	//a.Router.HandleFunc("/admin/rooms/{id}", a.AdminUpdateRoom).Methods("PUT")
 	//a.Router.HandleFunc("/admin/rooms/{id}", a.AdminDeleteRoom).Methods("DELETE")
 }

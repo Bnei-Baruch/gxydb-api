@@ -1,11 +1,16 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"math"
+	"math/rand"
 	"net/http"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/models"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 )
 
 func (s *ApiTestSuite) TestAdmin_GatewaysHandleInfoForbidden() {
@@ -107,4 +112,131 @@ func (s *ApiTestSuite) TestAdmin_ListRooms() {
 	body = s.request200json(req)
 	s.Equal(10, int(body["total"].(float64)), "total")
 	s.Equal(10, len(body["data"].([]interface{})), "len(data)")
+
+	for i, room := range rooms {
+		req, _ = http.NewRequest("GET", fmt.Sprintf("/admin/rooms?page_no=%d&page_size=1&order_by=id", i+1), nil)
+		s.apiAuthP(req, []string{common.RoleRoot})
+		body = s.request200json(req)
+
+		s.Equal(10, int(body["total"].(float64)), "total")
+		data := body["data"].([]interface{})
+		s.Equal(1, len(data), "len(data)")
+		roomData := data[0].(map[string]interface{})
+		s.Equal(roomData["name"], room.Name, "name")
+		s.EqualValues(roomData["default_gateway_id"], room.DefaultGatewayID, "default_gateway_id")
+		s.EqualValues(roomData["gateway_uid"], room.GatewayUID, "gateway_uid")
+	}
+}
+
+func (s *ApiTestSuite) TestAdmin_GetRoomForbidden() {
+	req, _ := http.NewRequest("GET", "/admin/rooms/1", nil)
+	resp := s.request(req)
+	s.Require().Equal(http.StatusUnauthorized, resp.Code)
+
+	req, _ = http.NewRequest("GET", "/admin/rooms/1", nil)
+	s.apiAuth(req)
+	resp = s.request(req)
+	s.Require().Equal(http.StatusForbidden, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_GetRoomNotFound() {
+	req, _ := http.NewRequest("GET", "/admin/rooms/abc", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp := s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+
+	req, _ = http.NewRequest("GET", "/admin/rooms/1", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_GetRoom() {
+	gateway := s.createGateway()
+	room := s.createRoom(gateway)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/admin/rooms/%d", room.ID), nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body := s.request200json(req)
+	s.Equal(body["name"], room.Name, "name")
+	s.EqualValues(body["default_gateway_id"], room.DefaultGatewayID, "default_gateway_id")
+	s.EqualValues(body["gateway_uid"], room.GatewayUID, "gateway_uid")
+}
+
+func (s *ApiTestSuite) TestAdmin_CreateRoomForbidden() {
+	req, _ := http.NewRequest("POST", "/admin/rooms", nil)
+	resp := s.request(req)
+	s.Require().Equal(http.StatusUnauthorized, resp.Code)
+
+	req, _ = http.NewRequest("POST", "/admin/rooms", nil)
+	s.apiAuth(req)
+	resp = s.request(req)
+	s.Require().Equal(http.StatusForbidden, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_CreateRoomBadRequest() {
+	req, _ := http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer([]byte("{\"bad\":\"json")))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp := s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// non existing gateway
+	body := models.Room{
+		Name:       fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
+		GatewayUID: rand.Intn(math.MaxInt32),
+	}
+	b, _ := json.Marshal(body)
+	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// invalid gateway uid
+	gateway := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	body.DefaultGatewayID = gateway.ID
+	body.GatewayUID = -8
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// existing gateway_uid
+	room := s.createRoom(gateway)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+	body.GatewayUID = room.GatewayUID
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// existing name
+	body.Name = room.Name
+	body.GatewayUID = room.GatewayUID + 1
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_CreateRoom() {
+	gateway := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	payload := models.Room{
+		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
+		GatewayUID:       rand.Intn(math.MaxInt32),
+		DefaultGatewayID: gateway.ID,
+	}
+	b, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body := s.request201json(req)
+	s.Equal(payload.Name, body["name"], "name")
+	s.EqualValues(payload.GatewayUID, body["gateway_uid"], "gateway_uid")
+	s.EqualValues(payload.DefaultGatewayID, body["default_gateway_id"], "default_gateway_id")
+	s.False(body["disabled"].(bool), "disabled")
 }
