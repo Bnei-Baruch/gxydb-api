@@ -235,8 +235,112 @@ func (s *ApiTestSuite) TestAdmin_CreateRoom() {
 	req, _ := http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
 	s.apiAuthP(req, []string{common.RoleRoot})
 	body := s.request201json(req)
+	s.NotZero(body["id"], "id")
 	s.Equal(payload.Name, body["name"], "name")
 	s.EqualValues(payload.GatewayUID, body["gateway_uid"], "gateway_uid")
 	s.EqualValues(payload.DefaultGatewayID, body["default_gateway_id"], "default_gateway_id")
 	s.False(body["disabled"].(bool), "disabled")
+}
+
+func (s *ApiTestSuite) TestAdmin_UpdateRoomForbidden() {
+	req, _ := http.NewRequest("PUT", "/admin/rooms/1", nil)
+	resp := s.request(req)
+	s.Require().Equal(http.StatusUnauthorized, resp.Code)
+
+	req, _ = http.NewRequest("PUT", "/admin/rooms/1", nil)
+	s.apiAuth(req)
+	resp = s.request(req)
+	s.Require().Equal(http.StatusForbidden, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_UpdateRoomNotFound() {
+	req, _ := http.NewRequest("PUT", "/admin/rooms/abc", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp := s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+
+	req, _ = http.NewRequest("PUT", "/admin/rooms/1", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_UpdateRoomBadRequest() {
+	gateway := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	room := s.createRoom(gateway)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	req, _ := http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer([]byte("{\"bad\":\"json")))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp := s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// non existing gateway
+	body := models.Room{
+		Name:       fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
+		GatewayUID: rand.Intn(math.MaxInt32),
+	}
+	b, _ := json.Marshal(body)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// invalid gateway uid
+	body.DefaultGatewayID = gateway.ID
+	body.GatewayUID = -8
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// existing gateway_uid
+	room2 := s.createRoom(gateway)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+	body.GatewayUID = room2.GatewayUID
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// existing name
+	body.GatewayUID = room.GatewayUID
+	body.Name = room2.Name
+	b, _ = json.Marshal(body)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusBadRequest, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_UpdateRoom() {
+	gateway := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	payload := models.Room{
+		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
+		GatewayUID:       rand.Intn(math.MaxInt16),
+		DefaultGatewayID: gateway.ID,
+	}
+	b, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body := s.request201json(req)
+
+	gateway2 := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	payload.Name = fmt.Sprintf("%s_edit", payload.Name)
+	payload.DefaultGatewayID = gateway2.ID
+	payload.Disabled = true
+	b, _ = json.Marshal(payload)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", int64(body["id"].(float64))), bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(payload.Name, body["name"], "name")
+	s.EqualValues(payload.DefaultGatewayID, body["default_gateway_id"], "default_gateway_id")
+	s.True(body["disabled"].(bool), "disabled")
+	s.Greater(body["updated_at"], body["created_at"], "updated_at > created_at")
 }

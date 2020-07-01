@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	janus_admin "github.com/edoshor/janus-go/admin"
 	janus_plugins "github.com/edoshor/janus-go/plugins"
 	"github.com/gorilla/mux"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"github.com/volatiletech/null"
 	"github.com/volatiletech/sqlboiler/boil"
 	"github.com/volatiletech/sqlboiler/queries/qm"
 
@@ -238,6 +240,115 @@ func (a *App) AdminGetRoom(w http.ResponseWriter, r *http.Request) {
 			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 		}
 		return
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, room)
+}
+
+func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		httputil.NewNotFoundError().Abort(w, r)
+		return
+	}
+
+	room, err := models.FindRoom(a.DB, int64(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NewNotFoundError().Abort(w, r)
+		} else {
+			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		}
+		return
+	}
+
+	var data models.Room
+	if err := httputil.DecodeJSONBody(w, r, &data); err != nil {
+		err.Abort(w, r)
+		return
+	}
+	a.requestContext(r).Params = data
+
+	if data.GatewayUID <= 0 {
+		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
+		return
+	}
+
+	if _, ok := a.cache.gateways.ByID(data.DefaultGatewayID); !ok {
+		httputil.NewBadRequestError(nil, "gateway doesn't exists").Abort(w, r)
+		return
+	}
+
+	if exists, _ := models.Rooms(models.RoomWhere.GatewayUID.EQ(data.GatewayUID), models.RoomWhere.ID.NEQ(room.ID)).Exists(a.DB); exists {
+		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
+		return
+	}
+
+	if exists, _ := models.Rooms(models.RoomWhere.Name.EQ(data.Name), models.RoomWhere.ID.NEQ(room.ID)).Exists(a.DB); exists {
+		httputil.NewBadRequestError(nil, "room already exists [name]").Abort(w, r)
+		return
+	}
+
+	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+		shouldUpdateGateways := room.Name != data.Name
+
+		// update room in DB
+		room.Name = data.Name
+		room.DefaultGatewayID = data.DefaultGatewayID
+		room.Disabled = data.Disabled
+		room.UpdatedAt = null.TimeFrom(time.Now().UTC())
+		if _, err := room.Update(a.DB, boil.Whitelist("name", "default_gateway_id", "disabled", "updated_at")); err != nil {
+			return pkgerr.WithStack(err)
+		}
+
+		if !shouldUpdateGateways {
+			return nil
+		}
+
+		// update room in gateways
+		room := &janus_plugins.VideoroomRoomForEdit{
+			Room:        data.GatewayUID,
+			Description: data.Name,
+		}
+		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayVideoroomAdminKey).
+			EditRequest(room, true, common.Config.GatewayRoomsSecret)
+
+		for _, gateway := range a.cache.gateways.Values() {
+			if gateway.Type != common.GatewayTypeRooms {
+				continue
+			}
+
+			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
+			if err != nil {
+				return pkgerr.WithMessage(err, "Admin API for gateway")
+			}
+
+			if _, err = api.MessagePlugin(request); err != nil {
+				return pkgerr.Wrap(err, "api.MessagePlugin")
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		var hErr *httputil.HttpError
+		if errors.As(err, &hErr) {
+			hErr.Abort(w, r)
+		} else {
+			httputil.NewInternalError(err).Abort(w, r)
+		}
+		return
+	}
+
+	if err := a.cache.rooms.Reload(a.DB); err != nil {
+		log.Error().Err(err).Msg("Reload cache")
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, room)
