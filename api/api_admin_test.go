@@ -8,7 +8,10 @@ import (
 	"math/rand"
 	"net/http"
 
+	janus_plugins "github.com/edoshor/janus-go/plugins"
+
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 )
@@ -240,6 +243,11 @@ func (s *ApiTestSuite) TestAdmin_CreateRoom() {
 	s.EqualValues(payload.GatewayUID, body["gateway_uid"], "gateway_uid")
 	s.EqualValues(payload.DefaultGatewayID, body["default_gateway_id"], "default_gateway_id")
 	s.False(body["disabled"].(bool), "disabled")
+
+	// verify room is created on gateway
+	gRoom := s.findRoomInGateway(gateway, int(body["gateway_uid"].(float64)))
+	s.Require().NotNil(gRoom, "gateway room")
+	s.Equal(gRoom.Description, payload.Name, "gateway room description")
 }
 
 func (s *ApiTestSuite) TestAdmin_UpdateRoomForbidden() {
@@ -343,4 +351,78 @@ func (s *ApiTestSuite) TestAdmin_UpdateRoom() {
 	s.EqualValues(payload.DefaultGatewayID, body["default_gateway_id"], "default_gateway_id")
 	s.True(body["disabled"].(bool), "disabled")
 	s.Greater(body["updated_at"], body["created_at"], "updated_at > created_at")
+
+	// verify room is updated on gateway
+	gRoom := s.findRoomInGateway(gateway, int(body["gateway_uid"].(float64)))
+	s.Require().NotNil(gRoom, "gateway room")
+	s.Equal(gRoom.Description, payload.Name, "gateway room description")
+}
+
+func (s *ApiTestSuite) TestAdmin_DeleteRoomForbidden() {
+	req, _ := http.NewRequest("DELETE", "/admin/rooms/1", nil)
+	resp := s.request(req)
+	s.Require().Equal(http.StatusUnauthorized, resp.Code)
+
+	req, _ = http.NewRequest("DELETE", "/admin/rooms/1", nil)
+	s.apiAuth(req)
+	resp = s.request(req)
+	s.Require().Equal(http.StatusForbidden, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_DeleteRoomNotFound() {
+	req, _ := http.NewRequest("DELETE", "/admin/rooms/abc", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp := s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+
+	req, _ = http.NewRequest("DELETE", "/admin/rooms/1", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	resp = s.request(req)
+	s.Require().Equal(http.StatusNotFound, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_DeleteRoom() {
+	gateway := s.createGatewayP(common.GatewayTypeRooms, s.GatewayManager.Config.AdminURL, s.GatewayManager.Config.AdminSecret)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	payload := models.Room{
+		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
+		GatewayUID:       rand.Intn(math.MaxInt16),
+		DefaultGatewayID: gateway.ID,
+	}
+	b, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body := s.request201json(req)
+
+	id := int64(body["id"].(float64))
+	req, _ = http.NewRequest("DELETE", fmt.Sprintf("/admin/rooms/%d", id), nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	s.request200json(req)
+
+	// verify room removed_at is set in DB
+	room, err := models.FindRoom(s.DB, id)
+	s.Require().NoError(err, "models.FindRoom")
+	s.True(room.RemovedAt.Valid, "remove_at")
+
+	// verify room does not exists on gateway
+	s.Nil(s.findRoomInGateway(gateway, int(body["gateway_uid"].(float64))))
+}
+
+func (s *ApiTestSuite) findRoomInGateway(gateway *models.Gateway, id int) *janus_plugins.VideoroomRoomFromListResponse {
+	api, err := domain.GatewayAdminAPIRegistry.For(gateway)
+	s.Require().NoError(err, "Admin API for gateway")
+
+	request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayVideoroomAdminKey).ListRequest()
+	resp, err := api.MessagePlugin(request)
+	s.Require().NoError(err, "api.MessagePlugin")
+
+	tResp, _ := resp.(*janus_plugins.VideoroomListResponse)
+	for _, x := range tResp.Rooms {
+		if x.Room == id {
+			return x
+		}
+	}
+
+	return nil
 }

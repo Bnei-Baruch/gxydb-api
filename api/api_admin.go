@@ -147,6 +147,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// TODO: gateway_uid should be fully managed by us and not user input !
 	if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
 		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
 		return
@@ -226,13 +227,13 @@ func (a *App) AdminGetRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
 		httputil.NewNotFoundError().Abort(w, r)
 		return
 	}
 
-	room, err := models.FindRoom(a.DB, int64(id))
+	room, err := models.FindRoom(a.DB, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httputil.NewNotFoundError().Abort(w, r)
@@ -252,13 +253,13 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
 	if err != nil {
 		httputil.NewNotFoundError().Abort(w, r)
 		return
 	}
 
-	room, err := models.FindRoom(a.DB, int64(id))
+	room, err := models.FindRoom(a.DB, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httputil.NewNotFoundError().Abort(w, r)
@@ -296,7 +297,8 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
-		shouldUpdateGateways := room.Name != data.Name
+		shouldUpdateGateways := room.Name != data.Name &&
+			!room.RemovedAt.Valid
 
 		// update room in DB
 		room.Name = data.Name
@@ -352,6 +354,73 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, room)
+}
+
+func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, err := strconv.ParseInt(vars["id"], 10, 64)
+	if err != nil {
+		httputil.NewNotFoundError().Abort(w, r)
+		return
+	}
+
+	room, err := models.FindRoom(a.DB, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NewNotFoundError().Abort(w, r)
+		} else {
+			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		}
+		return
+	}
+
+	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+		room.RemovedAt = null.TimeFrom(time.Now().UTC())
+		if _, err := room.Update(a.DB, boil.Whitelist(models.RoomColumns.RemovedAt)); err != nil {
+			return httputil.NewInternalError(pkgerr.WithStack(err))
+		}
+
+		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayVideoroomAdminKey).
+			DestroyRequest(room.GatewayUID, true, common.Config.GatewayRoomsSecret)
+
+		for _, gateway := range a.cache.gateways.Values() {
+			if gateway.Type != common.GatewayTypeRooms {
+				continue
+			}
+
+			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
+			if err != nil {
+				return pkgerr.WithMessage(err, "Admin API for gateway")
+			}
+
+			if _, err = api.MessagePlugin(request); err != nil {
+				return pkgerr.Wrap(err, "api.MessagePlugin")
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		var hErr *httputil.HttpError
+		if errors.As(err, &hErr) {
+			hErr.Abort(w, r)
+		} else {
+			httputil.NewInternalError(err).Abort(w, r)
+		}
+		return
+	}
+
+	if err := a.cache.rooms.Reload(a.DB); err != nil {
+		log.Error().Err(err).Msg("Reload cache")
+	}
+
+	httputil.RespondSuccess(w)
 }
 
 type ListParams struct {

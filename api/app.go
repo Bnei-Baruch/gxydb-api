@@ -165,5 +165,5 @@ func (a *App) initializeRoutes() {
 	a.Router.HandleFunc("/admin/rooms", a.AdminCreateRoom).Methods("POST")
 	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminGetRoom).Methods("GET")
 	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminUpdateRoom).Methods("PUT")
-	//a.Router.HandleFunc("/admin/rooms/{id}", a.AdminDeleteRoom).Methods("DELETE")
+	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminDeleteRoom).Methods("DELETE")
 }
