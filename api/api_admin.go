@@ -137,24 +137,29 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	a.requestContext(r).Params = data
 
-	if data.GatewayUID <= 0 {
-		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
-		return
-	}
-
 	if _, ok := a.cache.gateways.ByID(data.DefaultGatewayID); !ok {
 		httputil.NewBadRequestError(nil, "gateway doesn't exists").Abort(w, r)
 		return
 	}
 
-	// TODO: gateway_uid should be fully managed by us and not user input !
-	if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
-		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
+	if exists, _ := models.Rooms(models.RoomWhere.Name.EQ(data.Name)).Exists(a.DB); exists {
+		httputil.NewBadRequestError(nil, "room already exists [name]").Abort(w, r)
 		return
 	}
 
-	if exists, _ := models.Rooms(models.RoomWhere.Name.EQ(data.Name)).Exists(a.DB); exists {
-		httputil.NewBadRequestError(nil, "room already exists [name]").Abort(w, r)
+	if data.GatewayUID == 0 {
+		var maxUID int
+		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid), 0) + 1"), qm.From(models.TableNames.Rooms)).
+			QueryRow(a.DB).Scan(&maxUID); err != nil {
+			httputil.NewInternalError(pkgerr.Wrap(err, "fetch max gateway_uid")).Abort(w, r)
+			return
+		}
+		data.GatewayUID = maxUID
+	} else if data.GatewayUID < 0 {
+		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
+		return
+	} else if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
+		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
 		return
 	}
 
