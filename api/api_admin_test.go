@@ -223,6 +223,17 @@ func (s *ApiTestSuite) TestAdmin_CreateRoomBadRequest() {
 	s.apiAuthP(req, []string{common.RoleRoot})
 	resp = s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// invalid name
+	body.GatewayUID = room.GatewayUID
+	for _, name := range []string{"", "אסור עברית", "123456789012345678901234567890123456789012345678901234567890123456789012345"} {
+		body.Name = name
+		b, _ = json.Marshal(body)
+		req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+		s.apiAuthP(req, []string{common.RoleRoot})
+		resp = s.request(req)
+		s.Require().Equal(http.StatusBadRequest, resp.Code)
+	}
 }
 
 func (s *ApiTestSuite) TestAdmin_CreateRoom() {
@@ -321,6 +332,16 @@ func (s *ApiTestSuite) TestAdmin_UpdateRoomBadRequest() {
 	s.apiAuthP(req, []string{common.RoleRoot})
 	resp = s.request(req)
 	s.Require().Equal(http.StatusBadRequest, resp.Code)
+
+	// invalid name
+	for _, name := range []string{"", "אסור עברית", "123456789012345678901234567890123456789012345678901234567890123456789012345"} {
+		body.Name = name
+		b, _ = json.Marshal(body)
+		req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
+		s.apiAuthP(req, []string{common.RoleRoot})
+		resp = s.request(req)
+		s.Require().Equal(http.StatusBadRequest, resp.Code)
+	}
 }
 
 func (s *ApiTestSuite) TestAdmin_UpdateRoom() {

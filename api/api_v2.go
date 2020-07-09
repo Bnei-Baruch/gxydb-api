@@ -22,7 +22,7 @@ func (a *App) V2GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, gateway := range gateways {
-		if gateway.Disabled {
+		if gateway.Disabled || gateway.RemovedAt.Valid {
 			continue
 		}
 

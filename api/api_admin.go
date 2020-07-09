@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/pkg/mathutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
 )
+
+var rxAlphanumeric = regexp.MustCompile("^[a-zA-Z0-9]+$")
 
 func (a *App) AdminGatewaysHandleInfo(w http.ResponseWriter, r *http.Request) {
 	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleAdmin, common.RoleRoot) {
@@ -147,6 +150,11 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rxAlphanumeric.MatchString(data.Name) || len(data.Name) > 64 {
+		httputil.NewBadRequestError(nil, "name must be alphanumeric up to 64 characters").Abort(w, r)
+		return
+	}
+
 	if data.GatewayUID == 0 {
 		var maxUID int
 		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid), 0) + 1"), qm.From(models.TableNames.Rooms)).
@@ -165,7 +173,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 
 	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		// create room in DB
-		if err := data.Insert(a.DB, boil.Whitelist("name", "default_gateway_id", "gateway_uid", "disabled")); err != nil {
+		if err := data.Insert(tx, boil.Whitelist("name", "default_gateway_id", "gateway_uid", "disabled")); err != nil {
 			return pkgerr.WithStack(err)
 		}
 
@@ -191,7 +199,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 			CreateRequest(room, true, []string{})
 
 		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Type != common.GatewayTypeRooms {
+			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
 				continue
 			}
 
@@ -286,6 +294,11 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !rxAlphanumeric.MatchString(data.Name) || len(data.Name) > 64 {
+		httputil.NewBadRequestError(nil, "name must be alphanumeric up to 64 characters").Abort(w, r)
+		return
+	}
+
 	if _, ok := a.cache.gateways.ByID(data.DefaultGatewayID); !ok {
 		httputil.NewBadRequestError(nil, "gateway doesn't exists").Abort(w, r)
 		return
@@ -310,7 +323,7 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 		room.DefaultGatewayID = data.DefaultGatewayID
 		room.Disabled = data.Disabled
 		room.UpdatedAt = null.TimeFrom(time.Now().UTC())
-		if _, err := room.Update(a.DB, boil.Whitelist("name", "default_gateway_id", "disabled", "updated_at")); err != nil {
+		if _, err := room.Update(tx, boil.Whitelist("name", "default_gateway_id", "disabled", "updated_at")); err != nil {
 			return pkgerr.WithStack(err)
 		}
 
@@ -327,7 +340,7 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 			EditRequest(room, true, common.Config.GatewayRoomsSecret)
 
 		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Type != common.GatewayTypeRooms {
+			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
 				continue
 			}
 
@@ -386,7 +399,7 @@ func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 
 	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		room.RemovedAt = null.TimeFrom(time.Now().UTC())
-		if _, err := room.Update(a.DB, boil.Whitelist(models.RoomColumns.RemovedAt)); err != nil {
+		if _, err := room.Update(tx, boil.Whitelist(models.RoomColumns.RemovedAt)); err != nil {
 			return httputil.NewInternalError(pkgerr.WithStack(err))
 		}
 
@@ -394,7 +407,7 @@ func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 			DestroyRequest(room.GatewayUID, true, common.Config.GatewayRoomsSecret)
 
 		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Type != common.GatewayTypeRooms {
+			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
 				continue
 			}
 
