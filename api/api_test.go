@@ -1640,6 +1640,7 @@ func (s *ApiTestSuite) createGatewayP(gType string, adminUrl, adminPwd string) *
 
 	gateway := &models.Gateway{
 		Name:           name,
+		Description:    null.StringFrom("description"),
 		URL:            "url",
 		AdminURL:       adminUrl,
 		AdminPassword:  base64.StdEncoding.EncodeToString(encAdminPwd),

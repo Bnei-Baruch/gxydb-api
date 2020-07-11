@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	janus_admin "github.com/edoshor/janus-go/admin"
@@ -27,7 +28,59 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
 )
 
-var rxAlphanumeric = regexp.MustCompile("^[a-zA-Z0-9]+$")
+func (a *App) AdminListGateways(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	query := r.URL.Query()
+	listParams, err := ParseListParams(query)
+	if err != nil {
+		httputil.NewBadRequestError(err, "malformed list parameters").Abort(w, r)
+		return
+	}
+
+	mods := make([]qm.QueryMod, 0)
+
+	// count query
+	var total int64
+	countMods := append([]qm.QueryMod{qm.Select("count(DISTINCT id)")}, mods...)
+	err = models.Gateways(countMods...).QueryRow(a.DB).Scan(&total)
+	if err != nil {
+		httputil.NewInternalError(err).Abort(w, r)
+		return
+	} else if total == 0 {
+		httputil.RespondWithJSON(w, http.StatusOK, GatewaysResponse{Gateways: make([]*GatewayDTO, 0)})
+		return
+	}
+
+	// order, limit, offset
+	_, offset := listParams.appendListMods(&mods)
+	if int64(offset) >= total {
+		httputil.RespondWithJSON(w, http.StatusOK, GatewaysResponse{Gateways: make([]*GatewayDTO, 0)})
+		return
+	}
+
+	// data query
+	gateways, err := models.Gateways(mods...).All(a.DB)
+	if err != nil {
+		httputil.NewInternalError(err).Abort(w, r)
+		return
+	}
+
+	dtos := make([]*GatewayDTO, len(gateways))
+	for i := range gateways {
+		dtos[i] = NewGatewayDTO(gateways[i])
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, GatewaysResponse{
+		ListResponse: ListResponse{
+			Total: total,
+		},
+		Gateways: dtos,
+	})
+}
 
 func (a *App) AdminGatewaysHandleInfo(w http.ResponseWriter, r *http.Request) {
 	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleAdmin, common.RoleRoot) {
@@ -85,13 +138,52 @@ func (a *App) AdminListRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	listParams, err := ParseListParams(r)
+	query := r.URL.Query()
+	listParams, err := ParseListParams(query)
 	if err != nil {
 		httputil.NewBadRequestError(err, "malformed list parameters").Abort(w, r)
 		return
 	}
 
+	roomsRequest, err := ParseRoomsRequest(query)
+	if err != nil {
+		httputil.NewBadRequestError(err, "malformed rooms request parameters").Abort(w, r)
+		return
+	}
+
 	mods := make([]qm.QueryMod, 0)
+
+	// filters
+	if roomsRequest.Disabled.Valid {
+		mods = append(mods, models.RoomWhere.Disabled.EQ(roomsRequest.Disabled.Bool))
+	}
+	if roomsRequest.Removed.Valid {
+		if roomsRequest.Removed.Bool {
+			mods = append(mods, models.RoomWhere.RemovedAt.IsNotNull())
+		} else {
+			mods = append(mods, models.RoomWhere.RemovedAt.IsNull())
+		}
+	}
+	if len(roomsRequest.Gateways) > 0 {
+		mods = append(mods, models.RoomWhere.DefaultGatewayID.IN(roomsRequest.Gateways))
+	}
+	if len(roomsRequest.Term) > 0 {
+		var clauses []string
+		var args []interface{}
+
+		// numeric value ?
+		if numVal, err := strconv.ParseUint(roomsRequest.Term, 10, 64); err == nil {
+			clauses = append(clauses,
+				fmt.Sprintf("%s = ?", models.RoomColumns.ID),
+				fmt.Sprintf("%s = ?", models.RoomColumns.GatewayUID))
+			args = append(args, numVal, numVal)
+		}
+
+		clauses = append(clauses, "name ~* ?")
+		args = append(args, roomsRequest.Term)
+
+		mods = append(mods, qm.Where(strings.Join(clauses, " OR "), args...))
+	}
 
 	// count query
 	var total int64
@@ -150,8 +242,8 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rxAlphanumeric.MatchString(data.Name) || len(data.Name) > 64 {
-		httputil.NewBadRequestError(nil, "name must be alphanumeric up to 64 characters").Abort(w, r)
+	if len(data.Name) == 0 || len(data.Name) > 64 {
+		httputil.NewBadRequestError(nil, "name is missing or longer than 64 characters").Abort(w, r)
 		return
 	}
 
@@ -294,8 +386,8 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rxAlphanumeric.MatchString(data.Name) || len(data.Name) > 64 {
-		httputil.NewBadRequestError(nil, "name must be alphanumeric up to 64 characters").Abort(w, r)
+	if len(data.Name) == 0 || len(data.Name) > 64 {
+		httputil.NewBadRequestError(nil, "name is missing or longer than 64 characters").Abort(w, r)
 		return
 	}
 
@@ -480,13 +572,11 @@ func (p *ListParams) appendListMods(mods *[]qm.QueryMod) (int, int) {
 	return limit, offset
 }
 
-func ParseListParams(r *http.Request) (*ListParams, error) {
+func ParseListParams(query url.Values) (*ListParams, error) {
 	params := &ListParams{
 		PageNumber: 1,
 		PageSize:   50,
 	}
-
-	query := r.URL.Query()
 
 	strVal := query.Get("page_no")
 	if strVal != "" {
@@ -522,7 +612,91 @@ type ListResponse struct {
 	Total int64 `json:"total"`
 }
 
+type RoomsRequest struct {
+	Gateways []int64
+	Disabled null.Bool
+	Removed  null.Bool
+	Term     string
+}
+
 type RoomsResponse struct {
 	ListResponse
 	Rooms []*models.Room `json:"data"`
+}
+
+func ParseRoomsRequest(query url.Values) (*RoomsRequest, error) {
+	req := &RoomsRequest{}
+
+	strVals := query["gateway_id"]
+	if len(strVals) > 0 {
+		req.Gateways = make([]int64, len(strVals))
+		for i, sVal := range strVals {
+			if val, err := strconv.ParseInt(sVal, 10, 64); err != nil {
+				return nil, fmt.Errorf("gateway is not an integer: %w", err)
+			} else if val < 1 {
+				return nil, fmt.Errorf("gateway ID must be at least 1")
+			} else {
+				req.Gateways[i] = val
+			}
+		}
+	}
+
+	strVal := query.Get("disabled")
+	if strVal != "" {
+		switch strVal {
+		case "true":
+			req.Disabled = null.BoolFrom(true)
+		case "false":
+			req.Disabled = null.BoolFrom(false)
+		default:
+			return nil, fmt.Errorf("disabled must be either `true` or `false`")
+		}
+	}
+
+	strVal = query.Get("removed")
+	if strVal != "" {
+		switch strVal {
+		case "true":
+			req.Removed = null.BoolFrom(true)
+		case "false":
+			req.Removed = null.BoolFrom(false)
+		default:
+			return nil, fmt.Errorf("removed must be either `true` or `false`")
+		}
+	}
+
+	req.Term = query.Get("term")
+
+	return req, nil
+}
+
+type GatewayDTO struct {
+	ID          int64       `json:"id"`
+	Name        string      `json:"name"`
+	Description null.String `json:"description,omitempty"`
+	URL         string      `json:"url"`
+	Disabled    bool        `json:"disabled"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   null.Time   `json:"updated_at,omitempty"`
+	RemovedAt   null.Time   `json:"removed_at,omitempty"`
+	Type        string      `json:"type"`
+}
+
+func NewGatewayDTO(g *models.Gateway) *GatewayDTO {
+	return &GatewayDTO{
+		ID:          g.ID,
+		Name:        g.Name,
+		Description: g.Description,
+		URL:         g.URL,
+		Disabled:    g.Disabled,
+		CreatedAt:   g.CreatedAt,
+		UpdatedAt:   g.UpdatedAt,
+		RemovedAt:   g.RemovedAt,
+		Type:        g.Type,
+	}
+}
+
+type GatewaysResponse struct {
+	ListResponse
+	Gateways []*GatewayDTO `json:"data"`
 }

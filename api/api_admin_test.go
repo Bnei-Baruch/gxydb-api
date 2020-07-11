@@ -7,14 +7,77 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"time"
 
 	janus_plugins "github.com/edoshor/janus-go/plugins"
+	"github.com/volatiletech/null"
+	"github.com/volatiletech/sqlboiler/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 )
+
+func (s *ApiTestSuite) TestAdmin_ListGatewaysForbidden() {
+	req, _ := http.NewRequest("GET", "/admin/gateways", nil)
+	resp := s.request(req)
+	s.Require().Equal(http.StatusUnauthorized, resp.Code)
+
+	req, _ = http.NewRequest("GET", "/admin/gateways", nil)
+	s.apiAuth(req)
+	resp = s.request(req)
+	s.Require().Equal(http.StatusForbidden, resp.Code)
+}
+
+func (s *ApiTestSuite) TestAdmin_ListGatewaysBadRequest() {
+	args := [...]string{
+		"page_no=0",
+		"page_no=-1",
+		"page_no=abc",
+		"page_size=0",
+		"page_size=-1",
+		"page_size=abc",
+	}
+	for i, query := range args {
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/admin/gateways?%s", query), nil)
+		s.apiAuthP(req, []string{common.RoleRoot})
+		resp := s.request(req)
+		s.Require().Equal(http.StatusBadRequest, resp.Code, i)
+	}
+}
+
+func (s *ApiTestSuite) TestAdmin_ListGateways() {
+	req, _ := http.NewRequest("GET", "/admin/gateways", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body := s.request200json(req)
+	s.Equal(0, int(body["total"].(float64)), "total")
+	s.Equal(0, len(body["data"].([]interface{})), "len(data)")
+
+	gateways := make([]*models.Gateway, 10)
+	for i := range gateways {
+		gateways[i] = s.createGateway()
+	}
+
+	body = s.request200json(req)
+	s.Equal(10, int(body["total"].(float64)), "total")
+	s.Equal(10, len(body["data"].([]interface{})), "len(data)")
+
+	for i, gateway := range gateways {
+		req, _ = http.NewRequest("GET", fmt.Sprintf("/admin/gateways?page_no=%d&page_size=1&order_by=id", i+1), nil)
+		s.apiAuthP(req, []string{common.RoleRoot})
+		body = s.request200json(req)
+
+		s.Equal(10, int(body["total"].(float64)), "total")
+		data := body["data"].([]interface{})
+		s.Equal(1, len(data), "len(data)")
+		gatewayData := data[0].(map[string]interface{})
+		s.Equal(gatewayData["name"], gateway.Name, "name")
+		s.Equal(gatewayData["description"], gateway.Description.String, "description")
+		s.NotContains(gatewayData, "admin_password", "admin_password")
+		s.NotContains(gatewayData, "events_password", "events_password")
+	}
+}
 
 func (s *ApiTestSuite) TestAdmin_GatewaysHandleInfoForbidden() {
 	req, _ := http.NewRequest("GET", "/admin/gateways/1/sessions/1/handles/1/info", nil)
@@ -128,6 +191,76 @@ func (s *ApiTestSuite) TestAdmin_ListRooms() {
 		s.Equal(roomData["name"], room.Name, "name")
 		s.EqualValues(roomData["default_gateway_id"], room.DefaultGatewayID, "default_gateway_id")
 		s.EqualValues(roomData["gateway_uid"], room.GatewayUID, "gateway_uid")
+	}
+
+	// disabled filter
+	rooms[0].Disabled = true
+	_, err := rooms[0].Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled))
+	s.Require().NoError(err)
+	req, _ = http.NewRequest("GET", "/admin/rooms?disabled=true", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(1, int(body["total"].(float64)), "total")
+	s.Equal(1, len(body["data"].([]interface{})), "len(data)")
+	s.Equal(body["data"].([]interface{})[0].(map[string]interface{})["name"], rooms[0].Name, "name")
+	req, _ = http.NewRequest("GET", "/admin/rooms?disabled=false&order_by=id", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(9, int(body["total"].(float64)), "total")
+	s.Equal(9, len(body["data"].([]interface{})), "len(data)")
+	data := body["data"].([]interface{})
+	for i, item := range data {
+		s.Equal(item.(map[string]interface{})["name"], rooms[i+1].Name, "name")
+	}
+
+	// removed filter
+	rooms[9].RemovedAt = null.TimeFrom(time.Now().UTC())
+	_, err = rooms[9].Update(s.DB, boil.Whitelist(models.RoomColumns.RemovedAt))
+	s.Require().NoError(err)
+	req, _ = http.NewRequest("GET", "/admin/rooms?removed=true", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(1, int(body["total"].(float64)), "total")
+	s.Equal(1, len(body["data"].([]interface{})), "len(data)")
+	s.Equal(body["data"].([]interface{})[0].(map[string]interface{})["name"], rooms[9].Name, "name")
+	req, _ = http.NewRequest("GET", "/admin/rooms?removed=false&order_by=id", nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(9, int(body["total"].(float64)), "total")
+	s.Equal(9, len(body["data"].([]interface{})), "len(data)")
+	data = body["data"].([]interface{})
+	for i, item := range data {
+		s.Equal(item.(map[string]interface{})["name"], rooms[i].Name, "name")
+	}
+
+	// gateways filter
+	gateway2 := s.createGateway()
+	rooms[0].DefaultGatewayID = gateway2.ID
+	_, err = rooms[0].Update(s.DB, boil.Whitelist(models.RoomColumns.DefaultGatewayID))
+	s.Require().NoError(err)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/admin/rooms?gateway_id=%d", gateway2.ID), nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(1, int(body["total"].(float64)), "total")
+	s.Equal(1, len(body["data"].([]interface{})), "len(data)")
+	s.Equal(body["data"].([]interface{})[0].(map[string]interface{})["name"], rooms[0].Name, "name")
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/admin/rooms?gateway_id=%d&order_by=id", gateway.ID), nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(9, int(body["total"].(float64)), "total")
+	s.Equal(9, len(body["data"].([]interface{})), "len(data)")
+	data = body["data"].([]interface{})
+	for i, item := range data {
+		s.Equal(item.(map[string]interface{})["name"], rooms[i+1].Name, "name")
+	}
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/admin/rooms?gateway_id=%d&gateway_id=%d&order_by=id", gateway.ID, gateway2.ID), nil)
+	s.apiAuthP(req, []string{common.RoleRoot})
+	body = s.request200json(req)
+	s.Equal(10, int(body["total"].(float64)), "total")
+	s.Equal(10, len(body["data"].([]interface{})), "len(data)")
+	data = body["data"].([]interface{})
+	for i, item := range data {
+		s.Equal(item.(map[string]interface{})["name"], rooms[i].Name, "name")
 	}
 }
 
