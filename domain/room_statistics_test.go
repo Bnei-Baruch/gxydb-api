@@ -8,22 +8,18 @@ import (
 	"github.com/volatiletech/sqlboiler/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/models"
-	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil"
 )
 
 type RoomStatisticsTestSuite struct {
 	ModelsSuite
-	testutil.GatewayManager
 }
 
 func (s *RoomStatisticsTestSuite) SetupSuite() {
 	s.Require().NoError(s.InitTestDB())
-	s.GatewayManager.Init()
 }
 
 func (s *RoomStatisticsTestSuite) TearDownSuite() {
 	s.Require().NoError(s.DestroyTestDB())
-	s.Require().NoError(s.GatewayManager.CloseGateway())
 }
 
 func (s *RoomStatisticsTestSuite) SetupTest() {
@@ -32,7 +28,7 @@ func (s *RoomStatisticsTestSuite) SetupTest() {
 
 func (s *RoomStatisticsTestSuite) TearDownTest() {
 	s.DBCleaner.Clean(models.TableNames.Gateways)
-	s.GatewayManager.DestroyGatewaySessions()
+	//s.GatewayManager.DestroyGatewaySessions()
 }
 
 func (s *RoomStatisticsTestSuite) TestGetAll() {
