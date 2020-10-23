@@ -61,10 +61,15 @@ func (sm *V1SessionManager) HandleEvent(ctx context.Context, event interface{}) 
 					log.Ctx(ctx).Warn().Interface("event", event).Msg("type less gateway event")
 					return nil
 				}
+				eventTypeStr, ok := eventType.(string)
+				if !ok {
+					log.Ctx(ctx).Warn().Interface("event", event).Msg("event type is expected to be a string")
+					return nil
+				}
 
-				switch eventType.(string) {
-				case "leaving":
-					if err := sm.onVideoroomLeaving(ctx, tx, e); err != nil {
+				switch eventTypeStr {
+				case "leaving", "kicked", "unpublished":
+					if err := sm.onVideoroomLeaving(ctx, tx, e, eventTypeStr); err != nil {
 						return pkgerr.Wrap(err, "V1SessionManager.onVideoroomLeaving")
 					}
 				}
@@ -126,7 +131,7 @@ func (sm *V1SessionManager) Close() {
 	sm.cleaner.Close()
 }
 
-func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, event *janus.PluginEvent) error {
+func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, event *janus.PluginEvent, eventType string) error {
 	display, ok := event.Event.Data["display"].(string)
 	if !ok {
 		return nil // some service users don't set their display. ignore this event.
@@ -138,7 +143,7 @@ func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, 
 	}
 
 	logger := log.Ctx(ctx)
-	logger.Info().Msgf("%s has left room %v", v1User.ID, event.Event.Data["room"])
+	logger.Info().Msgf("%s has left room %v [%s]", v1User.ID, event.Event.Data["room"], eventType)
 
 	userID, err := sm.getInternalUserID(ctx, tx, &v1User)
 	if err != nil {
