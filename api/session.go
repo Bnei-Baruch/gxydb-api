@@ -310,22 +310,29 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 		return nil, NewProtocolError(fmt.Sprintf("Unknown gateway: %s", user.Janus))
 	}
 
-	return &models.Session{
-		UserID:         userID,
-		RoomID:         null.Int64From(room.ID),
-		GatewayID:      null.Int64From(gateway.ID),
-		GatewaySession: null.Int64From(user.Session),
-		GatewayHandle:  null.Int64From(user.Handle),
-		GatewayFeed:    null.Int64From(user.RFID),
-		Display:        null.StringFrom(user.Display),
-		Camera:         user.Camera,
-		Question:       user.Question,
-		SelfTest:       user.SelfTest,
-		SoundTest:      user.SoundTest,
-		UserAgent:      null.StringFrom(user.System),
-		IPAddress:      null.StringFrom(user.IP),
-		UpdatedAt:      null.TimeFrom(time.Now().UTC()),
-	}, nil
+	s := models.Session{
+		UserID:                userID,
+		RoomID:                null.Int64From(room.ID),
+		GatewayID:             null.Int64From(gateway.ID),
+		GatewaySession:        null.Int64From(user.Session),
+		GatewayHandle:         null.Int64From(user.Handle),
+		GatewayFeed:           null.Int64From(user.RFID),
+		GatewayHandleTextroom: null.Int64From(user.TextroomHandle),
+		Display:               null.StringFrom(user.Display),
+		Camera:                user.Camera,
+		Question:              user.Question,
+		SelfTest:              user.SelfTest,
+		SoundTest:             user.SoundTest,
+		UserAgent:             null.StringFrom(user.System),
+		IPAddress:             null.StringFrom(user.IP),
+		UpdatedAt:             null.TimeFrom(time.Now().UTC()),
+	}
+
+	if extraB, err := json.Marshal(user.Extra); err == nil {
+		s.Extra = null.JSONFrom(extraB)
+	}
+
+	return &s, nil
 }
 
 type PeriodicSessionCleaner struct {
