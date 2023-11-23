@@ -21,7 +21,7 @@ type GatewayManager struct {
 
 func (m *GatewayManager) Init() {
 	m.Config = &GatewayConfig{
-		GatewayURL:  "ws://localhost:8188/",
+		GatewayURL:  "http://localhost:8088/",
 		AdminURL:    "http://localhost:7088/admin",
 		AdminSecret: "janusoverlord",
 	}
