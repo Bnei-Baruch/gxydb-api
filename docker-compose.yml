@@ -15,10 +15,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./misc/janus/config/dev:/usr/janusgxy/etc/janus
-    ports:
-      - 8088:8088
-      - 7088:7088
-      - 8188:8188
+#    ports:
+#      - 8088:8088
+#      - 7088:7088
+#      - 8188:8188
   mqtt:
     image: eclipse-mosquitto:1.6
     restart: unless-stopped
