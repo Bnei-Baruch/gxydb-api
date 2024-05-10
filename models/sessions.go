@@ -29,7 +29,7 @@ type Session struct {
 	GatewayID             null.Int64  `boil:"gateway_id" json:"gateway_id,omitempty" toml:"gateway_id" yaml:"gateway_id,omitempty"`
 	GatewaySession        null.Int64  `boil:"gateway_session" json:"gateway_session,omitempty" toml:"gateway_session" yaml:"gateway_session,omitempty"`
 	GatewayHandle         null.Int64  `boil:"gateway_handle" json:"gateway_handle,omitempty" toml:"gateway_handle" yaml:"gateway_handle,omitempty"`
-	GatewayFeed           null.Int64  `boil:"gateway_feed" json:"gateway_feed,omitempty" toml:"gateway_feed" yaml:"gateway_feed,omitempty"`
+	GatewayFeed           null.String `boil:"gateway_feed" json:"gateway_feed,omitempty" toml:"gateway_feed" yaml:"gateway_feed,omitempty"`
 	Display               null.String `boil:"display" json:"display,omitempty" toml:"display" yaml:"display,omitempty"`
 	Camera                bool        `boil:"camera" json:"camera" toml:"camera" yaml:"camera"`
 	Question              bool        `boil:"question" json:"question" toml:"question" yaml:"question"`

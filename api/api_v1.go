@@ -592,7 +592,7 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,
-		RFID:           session.GatewayFeed.Int64,
+		RFID:           session.GatewayFeed.String,
 		TextroomHandle: session.GatewayHandleTextroom.Int64,
 		Camera:         session.Camera,
 		Question:       session.Question,
