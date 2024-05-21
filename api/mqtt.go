@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/edoshor/janus-go"
 	"net/url"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -106,8 +107,15 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
 		Msg("MQTT handle event")
-	var ctx context.Context
-	if err := l.SessionManager.HandleEvent(ctx, string(m.Payload())); err != nil {
+
+	ctx := context.Background()
+	event, err := janus.ParseEvent(m.Payload())
+	if err != nil {
+		log.Error().Err(err).Msg("parsing event error")
+		return
+	}
+
+	if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
 		log.Error().Err(err).Msg("event error")
 	} else {
 		m.Ack()
