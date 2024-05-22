@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 
@@ -16,12 +18,14 @@ type MQTTListener struct {
 	client                 mqtt.Client
 	cache                  *AppCache
 	serviceProtocolHandler ServiceProtocolHandler
+	SessionManager         SessionManager
 }
 
-func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler) *MQTTListener {
+func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionManager) *MQTTListener {
 	return &MQTTListener{
 		cache:                  cache,
 		serviceProtocolHandler: sph,
+		SessionManager:         sm,
 	}
 }
 
@@ -69,6 +73,9 @@ func (l *MQTTListener) Subscribe(c mqtt.Client) {
 	if token := l.client.Subscribe("galaxy/service/#", byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
+	if token := l.client.Subscribe("gxydb/users/#", byte(1), l.UpdateSession); token.Wait() && token.Error() != nil {
+		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
+	}
 }
 
 func (l *MQTTListener) Close() {
@@ -86,6 +93,28 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Msg("MQTT handle service protocol")
 	if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
 		log.Error().Err(err).Msg("service protocol error")
+	} else {
+		m.Ack()
+	}
+}
+
+func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
+	log.Info().
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
+		Bytes("payload", m.Payload()).
+		Msg("MQTT handle service protocol")
+	var user *V1User
+	if err := json.Unmarshal(m.Payload(), &user); err != nil {
+		log.Error().Err(err).Msg("json.Unmarshal")
+		return
+	}
+	ctx := context.Background()
+	if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
+		log.Error().Err(err).Msg("update session error")
 	} else {
 		m.Ack()
 	}
