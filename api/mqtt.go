@@ -30,6 +30,7 @@ func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionMana
 }
 
 func (l *MQTTListener) Start() error {
+	// TODO: take log level from config
 	// logging
 	mqtt.DEBUG = NewPahoLogAdapter(zerolog.InfoLevel)
 	mqtt.WARN = NewPahoLogAdapter(zerolog.WarnLevel)
@@ -99,14 +100,15 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
-	log.Info().
-		Bool("Duplicate", m.Duplicate()).
-		Int8("QOS", int8(m.Qos())).
-		Bool("Retained", m.Retained()).
-		Str("Topic", m.Topic()).
-		Uint16("MessageID", m.MessageID()).
-		Bytes("payload", m.Payload()).
-		Msg("MQTT handle event")
+	//TODO: here need to be debug log
+	//log.Info().
+	//	Bool("Duplicate", m.Duplicate()).
+	//	Int8("QOS", int8(m.Qos())).
+	//	Bool("Retained", m.Retained()).
+	//	Str("Topic", m.Topic()).
+	//	Uint16("MessageID", m.MessageID()).
+	//	Bytes("payload", m.Payload()).
+	//	Msg("MQTT handle event")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
