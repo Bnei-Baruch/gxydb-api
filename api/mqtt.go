@@ -75,7 +75,8 @@ func (l *MQTTListener) Subscribe(c mqtt.Client) {
 	if token := l.client.Subscribe("galaxy/service/#", byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
-	if token := l.client.Subscribe("janus/events/#", byte(0), l.HandleEvent); token.Wait() && token.Error() != nil {
+	// We use mqtt broker filter to pass only needed events, so we use qos 1 here
+	if token := l.client.Subscribe("gxydb/events/#", byte(1), l.HandleEvent); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
 	if token := l.client.Subscribe("gxydb/users/#", byte(1), l.UpdateSession); token.Wait() && token.Error() != nil {
@@ -104,15 +105,14 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
-	//TODO: here need to be debug log
-	//log.Info().
-	//	Bool("Duplicate", m.Duplicate()).
-	//	Int8("QOS", int8(m.Qos())).
-	//	Bool("Retained", m.Retained()).
-	//	Str("Topic", m.Topic()).
-	//	Uint16("MessageID", m.MessageID()).
-	//	Bytes("payload", m.Payload()).
-	//	Msg("MQTT handle event")
+	log.Debug().
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
+		Bytes("payload", m.Payload()).
+		Msg("MQTT handle event")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
@@ -136,7 +136,7 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 		Str("Topic", m.Topic()).
 		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
-		Msg("MQTT handle service protocol")
+		Msg("MQTT update user session")
 	var user *V1User
 	if err := json.Unmarshal(m.Payload(), &user); err != nil {
 		log.Error().Err(err).Msg("json.Unmarshal")
