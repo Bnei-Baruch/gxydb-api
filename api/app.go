@@ -258,7 +258,7 @@ func (a *App) initInstrumentation() {
 
 func (a *App) initMQTT() {
 	if common.Config.MQTTBrokerUrl != "" {
-		a.mqttListener = NewMQTTListener(a.cache, a.serviceProtocolHandler)
+		a.mqttListener = NewMQTTListener(a.cache, a.serviceProtocolHandler, a.sessionManager)
 		if err := a.mqttListener.Start(); err != nil {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
 		}

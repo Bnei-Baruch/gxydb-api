@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"github.com/edoshor/janus-go"
 	"net/url"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -16,16 +18,19 @@ type MQTTListener struct {
 	client                 mqtt.Client
 	cache                  *AppCache
 	serviceProtocolHandler ServiceProtocolHandler
+	SessionManager         SessionManager
 }
 
-func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler) *MQTTListener {
+func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionManager) *MQTTListener {
 	return &MQTTListener{
 		cache:                  cache,
 		serviceProtocolHandler: sph,
+		SessionManager:         sm,
 	}
 }
 
 func (l *MQTTListener) Start() error {
+	// TODO: take log level from config
 	// logging
 	mqtt.DEBUG = NewPahoLogAdapter(zerolog.InfoLevel)
 	mqtt.WARN = NewPahoLogAdapter(zerolog.WarnLevel)
@@ -69,6 +74,9 @@ func (l *MQTTListener) Subscribe(c mqtt.Client) {
 	if token := l.client.Subscribe("galaxy/service/#", byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
+	if token := l.client.Subscribe("janus/events/#", byte(0), l.HandleEvent); token.Wait() && token.Error() != nil {
+		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
+	}
 }
 
 func (l *MQTTListener) Close() {
@@ -86,6 +94,31 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Msg("MQTT handle service protocol")
 	if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
 		log.Error().Err(err).Msg("service protocol error")
+	} else {
+		m.Ack()
+	}
+}
+
+func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
+	//TODO: here need to be debug log
+	//log.Info().
+	//	Bool("Duplicate", m.Duplicate()).
+	//	Int8("QOS", int8(m.Qos())).
+	//	Bool("Retained", m.Retained()).
+	//	Str("Topic", m.Topic()).
+	//	Uint16("MessageID", m.MessageID()).
+	//	Bytes("payload", m.Payload()).
+	//	Msg("MQTT handle event")
+
+	ctx := context.Background()
+	event, err := janus.ParseEvent(m.Payload())
+	if err != nil {
+		log.Error().Err(err).Msg("parsing event error")
+		return
+	}
+
+	if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
+		log.Error().Err(err).Msg("event error")
 	} else {
 		m.Ack()
 	}
