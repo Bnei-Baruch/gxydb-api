@@ -97,11 +97,13 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
 		Msg("MQTT handle service protocol")
-	if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
-		log.Error().Err(err).Msg("service protocol error")
-	} else {
-		m.Ack()
-	}
+
+	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
+	go func() {
+		if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
+			log.Error().Err(err).Msg("service protocol error")
+		}
+	}()
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
@@ -121,11 +123,11 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 		return
 	}
 
-	if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
-		log.Error().Err(err).Msg("event error")
-	} else {
-		m.Ack()
-	}
+	go func() {
+		if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
+			log.Error().Err(err).Msg("event error")
+		}
+	}()
 }
 
 func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
@@ -143,11 +145,12 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 		return
 	}
 	ctx := context.Background()
-	if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
-		log.Error().Err(err).Msg("update session error")
-	} else {
-		m.Ack()
-	}
+
+	go func() {
+		if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
+			log.Error().Err(err).Msg("update session error")
+		}
+	}()
 }
 
 type PahoLogAdapter struct {
