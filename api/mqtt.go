@@ -33,7 +33,7 @@ func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionMana
 func (l *MQTTListener) Start() error {
 	// TODO: take log level from config
 	// logging
-	mqtt.DEBUG = NewPahoLogAdapter(zerolog.InfoLevel)
+	mqtt.DEBUG = NewPahoLogAdapter(zerolog.DebugLevel)
 	mqtt.WARN = NewPahoLogAdapter(zerolog.WarnLevel)
 	mqtt.CRITICAL = NewPahoLogAdapter(zerolog.ErrorLevel)
 	mqtt.ERROR = NewPahoLogAdapter(zerolog.ErrorLevel)
@@ -89,7 +89,7 @@ func (l *MQTTListener) Close() {
 }
 
 func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
-	log.Info().
+	log.Debug().
 		Bool("Duplicate", m.Duplicate()).
 		Int8("QOS", int8(m.Qos())).
 		Bool("Retained", m.Retained()).
@@ -131,7 +131,7 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
-	log.Info().
+	log.Debug().
 		Bool("Duplicate", m.Duplicate()).
 		Int8("QOS", int8(m.Qos())).
 		Bool("Retained", m.Retained()).
