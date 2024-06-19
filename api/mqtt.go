@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/edoshor/janus-go"
 	"net/url"
@@ -32,7 +33,7 @@ func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionMana
 func (l *MQTTListener) Start() error {
 	// TODO: take log level from config
 	// logging
-	mqtt.DEBUG = NewPahoLogAdapter(zerolog.InfoLevel)
+	mqtt.DEBUG = NewPahoLogAdapter(zerolog.DebugLevel)
 	mqtt.WARN = NewPahoLogAdapter(zerolog.WarnLevel)
 	mqtt.CRITICAL = NewPahoLogAdapter(zerolog.ErrorLevel)
 	mqtt.ERROR = NewPahoLogAdapter(zerolog.ErrorLevel)
@@ -74,7 +75,11 @@ func (l *MQTTListener) Subscribe(c mqtt.Client) {
 	if token := l.client.Subscribe("galaxy/service/#", byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
-	if token := l.client.Subscribe("janus/events/#", byte(0), l.HandleEvent); token.Wait() && token.Error() != nil {
+	// We use mqtt broker filter to pass only needed events, so we use qos 1 here
+	if token := l.client.Subscribe("gxydb/events/#", byte(1), l.HandleEvent); token.Wait() && token.Error() != nil {
+		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
+	}
+	if token := l.client.Subscribe("gxydb/users/#", byte(1), l.UpdateSession); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe")
 	}
 }
@@ -84,7 +89,7 @@ func (l *MQTTListener) Close() {
 }
 
 func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
-	log.Info().
+	log.Debug().
 		Bool("Duplicate", m.Duplicate()).
 		Int8("QOS", int8(m.Qos())).
 		Bool("Retained", m.Retained()).
@@ -92,23 +97,24 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
 		Msg("MQTT handle service protocol")
-	if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
-		log.Error().Err(err).Msg("service protocol error")
-	} else {
-		m.Ack()
-	}
+
+	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
+	go func() {
+		if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
+			log.Error().Err(err).Msg("service protocol error")
+		}
+	}()
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
-	//TODO: here need to be debug log
-	//log.Info().
-	//	Bool("Duplicate", m.Duplicate()).
-	//	Int8("QOS", int8(m.Qos())).
-	//	Bool("Retained", m.Retained()).
-	//	Str("Topic", m.Topic()).
-	//	Uint16("MessageID", m.MessageID()).
-	//	Bytes("payload", m.Payload()).
-	//	Msg("MQTT handle event")
+	log.Debug().
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
+		Bytes("payload", m.Payload()).
+		Msg("MQTT handle event")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
@@ -117,11 +123,34 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 		return
 	}
 
-	if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
-		log.Error().Err(err).Msg("event error")
-	} else {
-		m.Ack()
+	go func() {
+		if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
+			log.Error().Err(err).Msg("event error")
+		}
+	}()
+}
+
+func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
+	log.Debug().
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
+		Bytes("payload", m.Payload()).
+		Msg("MQTT update user session")
+	var user *V1User
+	if err := json.Unmarshal(m.Payload(), &user); err != nil {
+		log.Error().Err(err).Msg("json.Unmarshal")
+		return
 	}
+	ctx := context.Background()
+
+	go func() {
+		if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
+			log.Error().Err(err).Msg("update session error")
+		}
+	}()
 }
 
 type PahoLogAdapter struct {
