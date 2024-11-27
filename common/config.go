@@ -31,6 +31,7 @@ type config struct {
 	MQTTClientID          string
 	MQTTPassword          string
 	MQTTSecure            bool
+	VHUrl                 string
 }
 
 func newConfig() *config {
@@ -56,6 +57,7 @@ func newConfig() *config {
 		MQTTClientID:          "gxydb-api-dev",
 		MQTTPassword:          "",
 		MQTTSecure:            false,
+		VHUrl:                 "https://api.kli.one",
 	}
 }
 
@@ -155,5 +157,8 @@ func Init() {
 	}
 	if val := os.Getenv("MQTT_SECURE"); val != "" {
 		Config.MQTTSecure = val == "true"
+	}
+	if val := os.Getenv("VH_URL"); val != "" {
+		Config.VHUrl = val
 	}
 }

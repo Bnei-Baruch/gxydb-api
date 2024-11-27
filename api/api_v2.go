@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/middleware"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
 )
 
@@ -78,4 +81,39 @@ func (a *App) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.RespondSuccess(w)
+}
+
+type VHInfo struct {
+	UserID    string    `json:"id"`
+	FirstName string    `json:"first_name"`
+	LastName  string    `json:"last_name"`
+	Email     string    `json:"email"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (a *App) V2GetVHInfo(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
+	defer cancel()
+
+	rCtx, ok := middleware.ContextFromRequest(r)
+	if !ok {
+		httputil.NewInternalError(errors.New("request missing context")).Abort(w, r)
+		return
+	}
+
+	url := fmt.Sprintf("%s/profile/v1/profile/%s/short", common.Config.VHUrl, rCtx.IDClaims.Sub)
+	payload, err := httputil.HTTPGetWithAuth(ctx, url, r.Header.Get("Authorization"))
+	if err != nil {
+		httputil.NewInternalError(err).Abort(w, r)
+		return
+	}
+
+	var vhinfo VHInfo
+	if err := json.Unmarshal([]byte(payload), &vhinfo); err != nil {
+		httputil.NewInternalError(fmt.Errorf("json.Unmarshal VH info: %w", err)).Abort(w, r)
+		return
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, vhinfo)
 }

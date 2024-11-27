@@ -192,6 +192,7 @@ func (a *App) initRoutes() {
 	// api v2 (next)
 	a.Router.HandleFunc("/v2/config", a.V2GetConfig).Methods("GET")
 	a.Router.HandleFunc("/v2/rooms_statistics", a.V2GetRoomsStatistics).Methods("GET") // Here due to more open permissions. otherwise might be under /admin/
+	a.Router.HandleFunc("/v2/vhinfo", a.V2GetVHInfo).Methods("GET")
 
 	// admin
 	a.Router.HandleFunc("/admin/gateways", a.AdminListGateways).Methods("GET")
