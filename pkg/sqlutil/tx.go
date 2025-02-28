@@ -6,7 +6,7 @@ import (
 
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/volatiletech/sqlboiler/boil"
+	"github.com/volatiletech/sqlboiler/v4/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/pkg/errs"
 )
