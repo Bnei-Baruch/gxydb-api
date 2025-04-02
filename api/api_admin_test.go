@@ -575,7 +575,7 @@ func (s *ApiTestSuite) TestAdmin_DeleteRoomsStatistics() {
 	for i := range rooms {
 		rooms[i] = s.CreateRoom(gateway)
 		roomStatistic := models.RoomStatistic{
-			RoomID: rooms[i].ID,
+			RoomID: fmt.Sprintf("%d", rooms[i].ID),
 			OnAir:  i + 1,
 		}
 		err := roomStatistic.Insert(s.DB, boil.Infer())

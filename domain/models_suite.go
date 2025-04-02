@@ -74,11 +74,11 @@ func (s *ModelsSuite) CreateRoom(gateway *models.Gateway) *models.Room {
 func (s *ModelsSuite) CreateSession(user *models.User, gateway *models.Gateway, room *models.Room) *models.Session {
 	session := &models.Session{
 		UserID:         user.ID,
-		RoomID:         null.Int64From(room.ID),
+		RoomID:         null.StringFrom(fmt.Sprintf("%d", room.ID)),
 		GatewayID:      null.Int64From(gateway.ID),
 		GatewaySession: null.Int64From(rand.Int63n(math.MaxInt32)),
 		GatewayHandle:  null.Int64From(rand.Int63n(math.MaxInt32)),
-		GatewayFeed:    null.Int64From(rand.Int63n(math.MaxInt32)),
+		GatewayFeed:    null.StringFrom(fmt.Sprintf("%d", rand.Int63n(math.MaxInt32))),
 		Display:        user.Username,
 		Camera:         true,
 		Question:       false,
@@ -100,7 +100,7 @@ func (s *ModelsSuite) CreateComposite(rooms []*models.Room) *models.Composite {
 	cRooms := make([]*models.CompositesRoom, len(rooms))
 	for i, room := range rooms {
 		cRooms[i] = &models.CompositesRoom{
-			RoomID:    room.ID,
+			RoomID:    fmt.Sprintf("%d", room.ID),
 			GatewayID: room.DefaultGatewayID,
 			Position:  i + 1,
 		}

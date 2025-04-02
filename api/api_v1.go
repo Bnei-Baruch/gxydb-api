@@ -28,7 +28,7 @@ import (
 func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 
-	roomCounts := make(map[int64]int)
+	roomCounts := make(map[string]int64)
 	if withNumUsers := params.Get("with_num_users"); withNumUsers == "true" {
 		// fetch num_users for each room from sessions table.
 		// we distinct by user_id as we do in every other place (makeV1Room)
@@ -44,11 +44,10 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for rows.Next() {
-			var roomID int64
-			var numUsers int
+			var roomID string
+			var numUsers int64
 			if err := rows.Scan(&roomID, &numUsers); err != nil {
-				httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
-				return
+				return nil, err
 			}
 			roomCounts[roomID] = numUsers
 		}
@@ -77,7 +76,7 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 				Janus:       gateway.Name,
 				Description: room.Name,
 			},
-			NumUsers: roomCounts[room.ID],
+			NumUsers: int(roomCounts[fmt.Sprintf("%d", room.GatewayUID)]),
 		}
 	}
 
@@ -592,7 +591,7 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,
-		RFID:           session.GatewayFeed.Int64,
+		RFID:           session.GatewayFeed.String,
 		TextroomHandle: session.GatewayHandleTextroom.Int64,
 		Camera:         session.Camera,
 		Question:       session.Question,

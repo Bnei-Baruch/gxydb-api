@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -39,14 +40,14 @@ func (s *RoomStatisticsTestSuite) TestGetAll() {
 	s.Empty(rs, "empty rooms statistics")
 
 	gateway := s.CreateGateway()
-	roomStats := make(map[int64]*models.RoomStatistic)
+	roomStats := make(map[string]*models.RoomStatistic)
 	for i := 0; i < 5; i++ {
 		room := s.CreateRoom(gateway)
-		roomStats[room.ID] = &models.RoomStatistic{
-			RoomID: room.ID,
+		roomStats[fmt.Sprintf("%d", room.ID)] = &models.RoomStatistic{
+			RoomID: fmt.Sprintf("%d", room.ID),
 			OnAir:  i,
 		}
-		err = roomStats[room.ID].Insert(s.DB, boil.Infer())
+		err = roomStats[fmt.Sprintf("%d", room.ID)].Insert(s.DB, boil.Infer())
 		s.Require().NoError(err)
 	}
 
@@ -55,7 +56,7 @@ func (s *RoomStatisticsTestSuite) TestGetAll() {
 	s.Equal(len(rs), len(roomStats), "length")
 	for _, roomStat := range rs {
 		v, ok := roomStats[roomStat.RoomID]
-		s.Require().True(ok, "missing roomID %d", roomStat.RoomID)
+		s.Require().True(ok, "missing roomID %s", roomStat.RoomID)
 		s.Equal(v.OnAir, roomStat.OnAir, "OnAir")
 	}
 }
@@ -64,14 +65,14 @@ func (s *RoomStatisticsTestSuite) TestReset() {
 	rms := NewRoomStatisticsManager(s.DB)
 
 	gateway := s.CreateGateway()
-	roomStats := make(map[int64]*models.RoomStatistic)
+	roomStats := make(map[string]*models.RoomStatistic)
 	for i := 0; i < 5; i++ {
 		room := s.CreateRoom(gateway)
-		roomStats[room.ID] = &models.RoomStatistic{
-			RoomID: room.ID,
+		roomStats[fmt.Sprintf("%d", room.ID)] = &models.RoomStatistic{
+			RoomID: fmt.Sprintf("%d", room.ID),
 			OnAir:  i,
 		}
-		err := roomStats[room.ID].Insert(s.DB, boil.Infer())
+		err := roomStats[fmt.Sprintf("%d", room.ID)].Insert(s.DB, boil.Infer())
 		s.Require().NoError(err)
 	}
 
@@ -98,7 +99,7 @@ func (s *RoomStatisticsTestSuite) TestOnAir() {
 	room := s.CreateRoom(gateway)
 
 	for i := 0; i < 3; i++ {
-		err = rms.OnAir(room.ID)
+		err = rms.OnAir(fmt.Sprintf("%d", room.ID))
 		s.Require().NoError(err)
 		rs, err = rms.GetAll()
 		s.Require().NoError(err)

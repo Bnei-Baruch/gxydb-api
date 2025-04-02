@@ -24,20 +24,14 @@ func NewRoomStatisticsManager(db common.DBInterface) *RoomStatisticsManager {
 	}
 }
 
-func (m *RoomStatisticsManager) OnAir(roomID int64) error {
+func (m *RoomStatisticsManager) OnAir(roomID string) error {
 	roomStats, err := m.getOrCreate(roomID)
 	if err != nil {
-		return pkgerr.Wrap(err, "getOrCreate")
+		return err
 	}
-
 	roomStats.OnAir++
-
-	err = m.update(roomStats)
-	if err != nil {
-		return pkgerr.Wrap(err, "update")
-	}
-
-	return nil
+	_, err = roomStats.Update(m.db, boil.Infer())
+	return err
 }
 
 func (m *RoomStatisticsManager) GetAll() ([]*models.RoomStatistic, error) {
@@ -57,36 +51,27 @@ func (m *RoomStatisticsManager) Reset(ctx context.Context) error {
 	})
 }
 
-func (m *RoomStatisticsManager) getOrCreate(roomID int64) (*models.RoomStatistic, error) {
-	var roomStats *models.RoomStatistic
-
-	err := sqlutil.InTx(context.TODO(), m.db, func(tx *sql.Tx) error {
-		var err error
-		roomStats, err = models.FindRoomStatistic(tx, roomID)
-		if err != nil && err != sql.ErrNoRows {
-			return pkgerr.WithStack(err)
-		}
-
-		if roomStats != nil {
-			return nil
-		}
-
-		roomStats = &models.RoomStatistic{
-			RoomID: roomID,
-		}
-		err = roomStats.Insert(tx, boil.Infer())
-		if err != nil {
-			return pkgerr.WithStack(err)
-		}
-
-		return nil
-	})
-
+func (m *RoomStatisticsManager) getOrCreate(roomID string) (*models.RoomStatistic, error) {
+	tx, err := m.db.Begin()
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
-	return roomStats, nil
+	roomStats, err := models.FindRoomStatistic(tx, roomID)
+	if err == nil {
+		return roomStats, tx.Commit()
+	}
+
+	roomStats = &models.RoomStatistic{
+		RoomID: roomID,
+		OnAir:  0,
+	}
+	if err := roomStats.Insert(tx, boil.Infer()); err != nil {
+		return nil, err
+	}
+
+	return roomStats, tx.Commit()
 }
 
 func (m *RoomStatisticsManager) update(roomStats *models.RoomStatistic) error {

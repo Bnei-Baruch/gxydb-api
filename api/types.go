@@ -35,7 +35,7 @@ type V1User struct {
 	Timestamp      int64                  `json:"timestamp"`
 	Session        int64                  `json:"session"`
 	Handle         int64                  `json:"handle"`
-	RFID           int64                  `json:"rfid"`
+	RFID           string                 `json:"rfid"`
 	TextroomHandle int64                  `json:"textroom_handle"`
 	Camera         bool                   `json:"camera"`
 	Question       bool                   `json:"question"`
