@@ -20,16 +20,17 @@ import (
 )
 
 type App struct {
-	Router                 *mux.Router
-	Handler                http.Handler
-	DB                     common.DBInterface
-	cache                  *AppCache
-	sessionManager         SessionManager
-	serviceProtocolHandler ServiceProtocolHandler
-	gatewayTokensManager   *domain.GatewayTokensManager
-	roomsStatisticsManager *domain.RoomStatisticsManager
-	periodicStatsCollector *instrumentation.PeriodicCollector
-	mqttListener           *MQTTListener
+	Router                       *mux.Router
+	Handler                      http.Handler
+	DB                           common.DBInterface
+	cache                        *AppCache
+	sessionManager               SessionManager
+	serviceProtocolHandler       ServiceProtocolHandler
+	gatewayTokensManager         *domain.GatewayTokensManager
+	roomsStatisticsManager       *domain.RoomStatisticsManager
+	roomServerAssignmentManager  *domain.RoomServerAssignmentManager
+	periodicStatsCollector       *instrumentation.PeriodicCollector
+	mqttListener                 *MQTTListener
 }
 
 func (a *App) initOidc(issuerUrls []string) middleware.OIDCTokenVerifier {
@@ -65,9 +66,10 @@ func (a *App) InitializeWithDeps(db common.DBInterface, tokenVerifier middleware
 
 	a.initRoutes()
 	a.initCache()
+	a.initRoomsStatistics()
+	a.initRoomServerAssignments()
 	a.initSessionManagement()
 	a.initGatewayTokensMonitoring()
-	a.initRoomsStatistics()
 	a.initServiceProtocolHandler()
 	a.initMQTT()
 	a.initInstrumentation()
@@ -193,6 +195,7 @@ func (a *App) initRoutes() {
 	a.Router.HandleFunc("/v2/config", a.V2GetConfig).Methods("GET")
 	a.Router.HandleFunc("/v2/rooms_statistics", a.V2GetRoomsStatistics).Methods("GET") // Here due to more open permissions. otherwise might be under /admin/
 	a.Router.HandleFunc("/v2/vhinfo", a.V2GetVHInfo).Methods("GET")
+	a.Router.HandleFunc("/v2/room_server", a.V2GetRoomServer).Methods("POST")
 
 	// admin
 	a.Router.HandleFunc("/admin/gateways", a.AdminListGateways).Methods("GET")
@@ -229,7 +232,7 @@ func (a *App) initCache() {
 }
 
 func (a *App) initSessionManagement() {
-	a.sessionManager = NewV1SessionManager(a.DB, a.cache)
+	a.sessionManager = NewV1SessionManager(a.DB, a.cache, a.roomServerAssignmentManager)
 	a.sessionManager.Start()
 }
 
@@ -247,6 +250,10 @@ func (a *App) initGatewayTokensMonitoring() {
 
 func (a *App) initRoomsStatistics() {
 	a.roomsStatisticsManager = domain.NewRoomStatisticsManager(a.DB)
+}
+
+func (a *App) initRoomServerAssignments() {
+	a.roomServerAssignmentManager = domain.NewRoomServerAssignmentManager(a.DB, common.Config.AvailableJanusServers)
 }
 
 func (a *App) initInstrumentation() {

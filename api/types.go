@@ -20,6 +20,14 @@ type V2RoomStatistics struct {
 	OnAir int `json:"on_air"`
 }
 
+type V2RoomServerRequest struct {
+	Room int `json:"room"`
+}
+
+type V2RoomServerResponse struct {
+	Janus string `json:"janus"`
+}
+
 type V1User struct {
 	ID             string                 `json:"id"`
 	Display        string                 `json:"display"`

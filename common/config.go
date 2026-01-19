@@ -32,6 +32,7 @@ type config struct {
 	MQTTPassword          string
 	MQTTSecure            bool
 	VHUrl                 string
+	AvailableJanusServers []string
 }
 
 func newConfig() *config {
@@ -58,6 +59,7 @@ func newConfig() *config {
 		MQTTPassword:          "",
 		MQTTSecure:            false,
 		VHUrl:                 "https://api.kli.one",
+		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
 	}
 }
 
@@ -160,5 +162,8 @@ func Init() {
 	}
 	if val := os.Getenv("VH_URL"); val != "" {
 		Config.VHUrl = val
+	}
+	if val := os.Getenv("AVAILABLE_JANUS_SERVERS"); val != "" {
+		Config.AvailableJanusServers = strings.Split(val, ",")
 	}
 }

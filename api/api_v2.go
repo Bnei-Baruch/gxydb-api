@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	pkgerr "github.com/pkg/errors"
+
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
@@ -116,4 +118,30 @@ func (a *App) V2GetVHInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, vhinfo)
+}
+
+func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
+	var req V2RoomServerRequest
+	if err := httputil.DecodeJSONBody(w, r, &req); err != nil {
+		err.Abort(w, r)
+		return
+	}
+
+	// Validate room exists
+	room, ok := a.cache.rooms.ByGatewayUID(req.Room)
+	if !ok {
+		httputil.NewNotFoundError().Abort(w, r)
+		return
+	}
+
+	// Get or assign server
+	gatewayName, err := a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), room.ID)
+	if err != nil {
+		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		return
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
+		Janus: gatewayName,
+	})
 }

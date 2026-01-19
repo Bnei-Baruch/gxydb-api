@@ -40,7 +40,7 @@ func (s *ApiTestSuite) TestSessions_Clean() {
 	_, err = sessions[1].Update(s.DB, boil.Infer())
 	s.Require().NoError(err)
 
-	psc := NewPeriodicSessionCleaner(s.DB)
+	psc := NewPeriodicSessionCleaner(s.DB, nil)
 	psc.clean()
 
 	cleanedSessions, err := models.Sessions(models.SessionWhere.RemovedAt.IsNotNull()).All(s.DB)

@@ -19,6 +19,7 @@ import (
 	"github.com/volatiletech/sqlboiler/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/errs"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
@@ -33,17 +34,20 @@ type SessionManager interface {
 }
 
 type V1SessionManager struct {
-	db      common.DBInterface
-	cache   *AppCache
-	cleaner *PeriodicSessionCleaner
+	db                          common.DBInterface
+	cache                       *AppCache
+	cleaner                     *PeriodicSessionCleaner
+	roomServerAssignmentManager *domain.RoomServerAssignmentManager
 }
 
-func NewV1SessionManager(db common.DBInterface, cache *AppCache) SessionManager {
-	return &V1SessionManager{
-		db:      db,
-		cache:   cache,
-		cleaner: NewPeriodicSessionCleaner(db),
+func NewV1SessionManager(db common.DBInterface, cache *AppCache, rsam *domain.RoomServerAssignmentManager) SessionManager {
+	sm := &V1SessionManager{
+		db:                          db,
+		cache:                       cache,
+		roomServerAssignmentManager: rsam,
 	}
+	sm.cleaner = NewPeriodicSessionCleaner(db, rsam)
+	return sm
 }
 
 func (sm *V1SessionManager) HandleEvent(ctx context.Context, event interface{}) error {
@@ -289,6 +293,13 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 		return pkgerr.Wrap(err, "db upsert")
 	}
 
+	// Update last_used_at for room server assignment
+	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.Int64); err != nil {
+			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
+		}
+	}
+
 	return nil
 }
 
@@ -349,12 +360,16 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 }
 
 type PeriodicSessionCleaner struct {
-	ticker *time.Ticker
-	db     common.DBInterface
+	ticker                      *time.Ticker
+	db                          common.DBInterface
+	roomServerAssignmentManager *domain.RoomServerAssignmentManager
 }
 
-func NewPeriodicSessionCleaner(db common.DBInterface) *PeriodicSessionCleaner {
-	return &PeriodicSessionCleaner{db: db}
+func NewPeriodicSessionCleaner(db common.DBInterface, rsam *domain.RoomServerAssignmentManager) *PeriodicSessionCleaner {
+	return &PeriodicSessionCleaner{
+		db:                          db,
+		roomServerAssignmentManager: rsam,
+	}
 }
 
 func (psc *PeriodicSessionCleaner) Start() {
@@ -376,6 +391,7 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
+		psc.cleanRoomAssignments()
 	}
 }
 
@@ -474,5 +490,16 @@ func (psc *PeriodicSessionCleaner) clean() {
 			Int64("gateway", s.GatewayID.Int64).
 			Str("properties", string(s.Properties.JSON)).
 			Msg("PeriodicSessionCleaner revived")
+	}
+}
+
+func (psc *PeriodicSessionCleaner) cleanRoomAssignments() {
+	if psc.roomServerAssignmentManager == nil {
+		return
+	}
+
+	ctx := context.TODO()
+	if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
+		log.Error().Err(err).Msg("PeriodicSessionCleaner clean room assignments")
 	}
 }
