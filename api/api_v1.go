@@ -14,9 +14,9 @@ import (
 	"github.com/gorilla/mux"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/volatiletech/null"
-	"github.com/volatiletech/sqlboiler/boil"
-	"github.com/volatiletech/sqlboiler/queries/qm"
+	"github.com/volatiletech/null/v8"
+	"github.com/volatiletech/sqlboiler/v4/boil"
+	"github.com/volatiletech/sqlboiler/v4/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"

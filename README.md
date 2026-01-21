@@ -1,5 +1,52 @@
-# gxydb-api
+# Arvut DB API (gxydb-api)
 Backend API for the BB galaxy system.
+
+## Setup
+
+1. Clone the repository
+2. Create a `.env` file with the following environment variables:
+   ```
+   SECRET=12345678901234567890123456789012
+   MQTT_BROKER_URL=localhost:1883
+   ```
+   Note: The SECRET must be exactly 32 bytes for AES-256 encryption.
+
+3. Run database migrations:
+   ```
+   go run cmd/migrate.go
+   ```
+
+4. Generate models using SQLBoiler:
+   ```
+   sqlboiler psql
+   ```
+
+## Building
+
+```
+go build
+```
+
+## Running Tests
+
+To run tests that don't require external services:
+```
+./run_tests.sh
+```
+
+To run all tests (requires MQTT broker and Janus Gateway):
+```
+go test ./...
+```
+
+## External Dependencies
+
+Some tests require external services:
+- MQTT broker running on localhost:1883
+- Janus Gateway with Admin API running on localhost:7088
+
+If these services are not available, some tests will fail.
+
 
 ### Development Environment
 In local dev env we use docker-compose to have our dependencies setup for us.

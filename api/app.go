@@ -66,7 +66,7 @@ func (a *App) InitializeWithDeps(db common.DBInterface, tokenVerifier middleware
 	a.initRoutes()
 	a.initCache()
 	a.initSessionManagement()
-	a.initGatewayTokensMonitoring()
+	//a.initGatewayTokensMonitoring()
 	a.initRoomsStatistics()
 	a.initServiceProtocolHandler()
 	a.initMQTT()
