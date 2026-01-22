@@ -8,7 +8,7 @@ import (
 	"github.com/hashicorp/golang-lru"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/volatiletech/sqlboiler/queries/qm"
+	"github.com/volatiletech/sqlboiler/v4/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/domain"

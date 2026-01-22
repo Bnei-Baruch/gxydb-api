@@ -6,7 +6,7 @@ import (
 	janus_admin "github.com/edoshor/janus-go/admin"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
-	"github.com/volatiletech/sqlboiler/queries"
+	"github.com/volatiletech/sqlboiler/v4/queries"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/domain"
