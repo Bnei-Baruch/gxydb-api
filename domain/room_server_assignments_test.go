@@ -30,7 +30,7 @@ func (s *RoomServerAssignmentTestSuite) TearDownTest() {
 }
 
 func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_NewAssignment() {
-	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2", "gxy3"})
+	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2", "gxy3"}, 400, 10)
 
 	gateway := s.CreateGateway()
 	room := s.CreateRoom(gateway)
@@ -48,7 +48,7 @@ func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_NewAssignment() {
 }
 
 func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_LoadBalancing() {
-	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2"})
+	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2"}, 400, 10)
 
 	gateway1 := s.CreateGatewayWithName("gxy1")
 	gateway2 := s.CreateGatewayWithName("gxy2")
@@ -72,7 +72,7 @@ func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_LoadBalancing() {
 }
 
 func (s *RoomServerAssignmentTestSuite) TestCleanInactiveAssignments() {
-	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2"})
+	manager := NewRoomServerAssignmentManager(s.DB, []string{"gxy1", "gxy2"}, 400, 10)
 
 	gateway := s.CreateGateway()
 	room1 := s.CreateRoom(gateway)

@@ -33,12 +33,12 @@ type RoomServerAssignmentManager struct {
 	avgRoomOccupancy   int
 }
 
-func NewRoomServerAssignmentManager(db common.DBInterface, servers []string) *RoomServerAssignmentManager {
+func NewRoomServerAssignmentManager(db common.DBInterface, servers []string, maxCapacity, avgOccupancy int) *RoomServerAssignmentManager {
 	return &RoomServerAssignmentManager{
 		db:                 db,
 		availableServers:   servers,
-		maxServerCapacity:  400,
-		avgRoomOccupancy:   10,
+		maxServerCapacity:  maxCapacity,
+		avgRoomOccupancy:   avgOccupancy,
 	}
 }
 

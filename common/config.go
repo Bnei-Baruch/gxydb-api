@@ -33,6 +33,8 @@ type config struct {
 	MQTTSecure            bool
 	VHUrl                 string
 	AvailableJanusServers []string
+	MaxServerCapacity     int
+	AvgRoomOccupancy      int
 }
 
 func newConfig() *config {
@@ -60,6 +62,8 @@ func newConfig() *config {
 		MQTTSecure:            false,
 		VHUrl:                 "https://api.kli.one",
 		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
+		MaxServerCapacity:     400,
+		AvgRoomOccupancy:      10,
 	}
 }
 
@@ -165,5 +169,19 @@ func Init() {
 	}
 	if val := os.Getenv("AVAILABLE_JANUS_SERVERS"); val != "" {
 		Config.AvailableJanusServers = strings.Split(val, ",")
+	}
+	if val := os.Getenv("MAX_SERVER_CAPACITY"); val != "" {
+		pVal, err := strconv.Atoi(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.MaxServerCapacity = pVal
+	}
+	if val := os.Getenv("AVG_ROOM_OCCUPANCY"); val != "" {
+		pVal, err := strconv.Atoi(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.AvgRoomOccupancy = pVal
 	}
 }

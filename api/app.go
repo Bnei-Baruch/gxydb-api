@@ -253,7 +253,12 @@ func (a *App) initRoomsStatistics() {
 }
 
 func (a *App) initRoomServerAssignments() {
-	a.roomServerAssignmentManager = domain.NewRoomServerAssignmentManager(a.DB, common.Config.AvailableJanusServers)
+	a.roomServerAssignmentManager = domain.NewRoomServerAssignmentManager(
+		a.DB,
+		common.Config.AvailableJanusServers,
+		common.Config.MaxServerCapacity,
+		common.Config.AvgRoomOccupancy,
+	)
 }
 
 func (a *App) initInstrumentation() {

@@ -37,13 +37,23 @@ Get the server for connecting to a room.
 
 ## Configuration
 
-### Environment Variable
+### Environment Variables
 
 ```bash
+# Available Janus servers (default: gxy1-gxy12)
 AVAILABLE_JANUS_SERVERS=gxy1,gxy2,gxy3,gxy4,gxy5,gxy6,gxy7,gxy8,gxy9,gxy10,gxy11,gxy12
+
+# Maximum users per server (default: 400)
+MAX_SERVER_CAPACITY=400
+
+# Average users per room (default: 10)
+AVG_ROOM_OCCUPANCY=10
 ```
 
-By default, all servers gxy1-12 are used.
+**Defaults:**
+- Available servers: gxy1-12
+- Max server capacity: 400 users
+- Average room occupancy: 10 users
 
 ## Database
 
@@ -104,8 +114,6 @@ Uses existing `PeriodicSessionCleaner` mechanism:
 
 ## Limitations
 
-- **Maximum server capacity**: 400 users (hardcoded)
-- **Average room capacity**: 10 users (for calculations)
 - **Server priorities**: Not implemented in current version
 
 ## Future Improvements
