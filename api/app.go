@@ -20,17 +20,17 @@ import (
 )
 
 type App struct {
-	Router                       *mux.Router
-	Handler                      http.Handler
-	DB                           common.DBInterface
-	cache                        *AppCache
-	sessionManager               SessionManager
-	serviceProtocolHandler       ServiceProtocolHandler
-	gatewayTokensManager         *domain.GatewayTokensManager
-	roomsStatisticsManager       *domain.RoomStatisticsManager
-	roomServerAssignmentManager  *domain.RoomServerAssignmentManager
-	periodicStatsCollector       *instrumentation.PeriodicCollector
-	mqttListener                 *MQTTListener
+	Router                      *mux.Router
+	Handler                     http.Handler
+	DB                          common.DBInterface
+	cache                       *AppCache
+	sessionManager              SessionManager
+	serviceProtocolHandler      ServiceProtocolHandler
+	gatewayTokensManager        *domain.GatewayTokensManager
+	roomsStatisticsManager      *domain.RoomStatisticsManager
+	roomServerAssignmentManager *domain.RoomServerAssignmentManager
+	periodicStatsCollector      *instrumentation.PeriodicCollector
+	mqttListener                *MQTTListener
 }
 
 func (a *App) initOidc(issuerUrls []string) middleware.OIDCTokenVerifier {
@@ -70,7 +70,6 @@ func (a *App) InitializeWithDeps(db common.DBInterface, tokenVerifier middleware
 	a.initRoomServerAssignments()
 	a.initSessionManagement()
 	//a.initGatewayTokensMonitoring()
-	a.initRoomsStatistics()
 	a.initServiceProtocolHandler()
 	a.initMQTT()
 	a.initInstrumentation()
