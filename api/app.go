@@ -258,6 +258,7 @@ func (a *App) initRoomServerAssignments() {
 		common.Config.AvailableJanusServers,
 		common.Config.MaxServerCapacity,
 		common.Config.AvgRoomOccupancy,
+		common.Config.ServerRegions,
 	)
 }
 

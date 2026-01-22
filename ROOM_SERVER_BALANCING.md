@@ -19,9 +19,16 @@ Get the server for connecting to a room.
 **Request:**
 ```json
 {
-  "room": 2171
+  "room": 2171,
+  "geo": {
+    "country_code": "IL"
+  }
 }
 ```
+
+Fields:
+- `room` (required): Room number
+- `geo.country_code` (optional): User's country code for regional routing (e.g., "IL", "US", "RU")
 
 **Response:**
 ```json
@@ -29,6 +36,11 @@ Get the server for connecting to a room.
   "janus": "gxy5"
 }
 ```
+
+**Regional Routing:**
+- If `geo.country_code` is provided and matches a configured region, server will be selected from regional pool
+- Only applies to **first user** in room (assignment creation)
+- All subsequent users get the same server regardless of their country (sticky routing)
 
 **Response codes:**
 - `200 OK` - server successfully retrieved
@@ -48,12 +60,23 @@ MAX_SERVER_CAPACITY=400
 
 # Average users per room (default: 10)
 AVG_ROOM_OCCUPANCY=10
+
+# Regional server mapping (optional)
+# Format: "COUNTRY_CODE:server1,server2;COUNTRY_CODE2:server3,server4"
+SERVER_REGIONS=IL:gxy1,gxy2,gxy3;US:gxy4,gxy5,gxy6;RU:gxy7,gxy8,gxy9
 ```
 
 **Defaults:**
 - Available servers: gxy1-12
 - Max server capacity: 400 users
 - Average room occupancy: 10 users
+- Regional routing: disabled (no regions configured)
+
+**Regional Routing Example:**
+```bash
+# Israel users → gxy1-3, US users → gxy4-6, Russia users → gxy7-9
+SERVER_REGIONS=IL:gxy1,gxy2,gxy3;US:gxy4,gxy5,gxy6;RU:gxy7,gxy8,gxy9
+```
 
 ## Database
 
@@ -118,11 +141,7 @@ Uses existing `PeriodicSessionCleaner` mechanism:
 
 ## Future Improvements
 
-1. **Regional load balancing**: 
-   - Use `region` field in table
-   - Server assignment based on user region
-
-2. **Server priorities**:
+1. **Server priorities**:
    - Ability to set preferred servers
    - Fallback to other servers on overload
 
@@ -137,19 +156,50 @@ Uses existing `PeriodicSessionCleaner` mechanism:
 go test ./domain -run TestRoomServerAssignment
 ```
 
-## Usage Example
+## Usage Examples
+
+### Basic Usage (No Regional Routing)
 
 ```bash
-# 1. Client wants to connect to room 2171
+# 1. First user requests server for room 2171
 curl -X POST http://localhost:8081/v2/room_server \
   -H "Content-Type: application/json" \
   -d '{"room": 2171}'
 
 # Response: {"janus": "gxy5"}
 
-# 2. Client connects to server gxy5
-# 3. All subsequent users for room 2171 will get the same server "gxy5"
+# 2. Second user requests server for same room
+curl -X POST http://localhost:8081/v2/room_server \
+  -H "Content-Type: application/json" \
+  -d '{"room": 2171}'
 
-# 4. After all users leave the room, the assignment will be automatically removed
-# 5. Next request for room 2171 may get a different server depending on current load
+# Response: {"janus": "gxy5"}  (same server - sticky routing!)
+```
+
+### With Regional Routing
+
+```bash
+# Configuration: SERVER_REGIONS=IL:gxy1,gxy2;US:gxy3,gxy4
+
+# 1. First user from Israel requests room 2171
+curl -X POST http://localhost:8081/v2/room_server \
+  -H "Content-Type: application/json" \
+  -d '{"room": 2171, "geo": {"country_code": "IL"}}'
+
+# Response: {"janus": "gxy1"}  (regional server for IL)
+
+# 2. Second user from US requests same room 2171
+curl -X POST http://localhost:8081/v2/room_server \
+  -H "Content-Type: application/json" \
+  -d '{"room": 2171, "geo": {"country_code": "US"}}'
+
+# Response: {"janus": "gxy1"}  (same server - sticky routing ignores country!)
+
+# 3. After all users leave, assignment is removed
+# 4. New first user from US requests room 2171
+curl -X POST http://localhost:8081/v2/room_server \
+  -H "Content-Type: application/json" \
+  -d '{"room": 2171, "geo": {"country_code": "US"}}'
+
+# Response: {"janus": "gxy3"}  (now gets US regional server)
 ```

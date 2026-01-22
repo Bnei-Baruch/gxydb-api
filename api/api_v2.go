@@ -134,8 +134,14 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get or assign server
-	gatewayName, err := a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), room.ID)
+	// Extract country code from geo object
+	countryCode := ""
+	if req.Geo != nil {
+		countryCode = req.Geo.CountryCode
+	}
+
+	// Get or assign server with optional country code for regional routing
+	gatewayName, err := a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), room.ID, countryCode)
 	if err != nil {
 		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 		return

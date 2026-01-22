@@ -35,6 +35,7 @@ type config struct {
 	AvailableJanusServers []string
 	MaxServerCapacity     int
 	AvgRoomOccupancy      int
+	ServerRegions         map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
 }
 
 func newConfig() *config {
@@ -64,6 +65,7 @@ func newConfig() *config {
 		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
 		MaxServerCapacity:     400,
 		AvgRoomOccupancy:      10,
+		ServerRegions:         make(map[string][]string),
 	}
 }
 
@@ -183,5 +185,20 @@ func Init() {
 			panic(err)
 		}
 		Config.AvgRoomOccupancy = pVal
+	}
+	// Parse SERVER_REGIONS: format "IL:gxy1,gxy2;US:gxy3,gxy4;RU:gxy5,gxy6"
+	if val := os.Getenv("SERVER_REGIONS"); val != "" {
+		regions := strings.Split(val, ";")
+		for _, region := range regions {
+			parts := strings.Split(region, ":")
+			if len(parts) == 2 {
+				countryCode := strings.TrimSpace(parts[0])
+				servers := strings.Split(parts[1], ",")
+				for i := range servers {
+					servers[i] = strings.TrimSpace(servers[i])
+				}
+				Config.ServerRegions[countryCode] = servers
+			}
+		}
 	}
 }

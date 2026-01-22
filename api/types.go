@@ -20,8 +20,13 @@ type V2RoomStatistics struct {
 	OnAir int `json:"on_air"`
 }
 
+type V2RoomServerRequestGeo struct {
+	CountryCode string `json:"country_code,omitempty"` // e.g., "US", "RU", "IL"
+}
+
 type V2RoomServerRequest struct {
-	Room int `json:"room"`
+	Room int                      `json:"room"`
+	Geo  *V2RoomServerRequestGeo `json:"geo,omitempty"`
 }
 
 type V2RoomServerResponse struct {
