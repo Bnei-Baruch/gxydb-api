@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pkgerr "github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
@@ -134,17 +135,35 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract country code from geo object
-	countryCode := ""
-	if req.Geo != nil {
-		countryCode = req.Geo.CountryCode
-	}
+	var gatewayName string
+	var err error
 
-	// Get or assign server with optional country code for regional routing
-	gatewayName, err := a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), room.ID, countryCode)
-	if err != nil {
-		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
-		return
+	// Check mode: legacy (use default gateway) or scale (load balancing)
+	if !common.Config.ScaleMode {
+		// Legacy mode: return room's default gateway
+		gateway, ok := a.cache.gateways.ByID(room.DefaultGatewayID)
+		if !ok {
+			log.Ctx(r.Context()).Error().
+				Int64("default_gateway_id", room.DefaultGatewayID).
+				Int64("room_id", room.ID).
+				Int("room_gateway_uid", req.Room).
+				Msg("Gateway not found for room in legacy mode (SCALE=false). Ensure all rooms have valid default_gateway_id.")
+			httputil.NewInternalError(pkgerr.Errorf("gateway not found for room %d", req.Room)).Abort(w, r)
+			return
+		}
+		gatewayName = gateway.Name
+	} else {
+		// Scale mode: use load balancing with optional regional routing
+		countryCode := ""
+		if req.Geo != nil {
+			countryCode = req.Geo.CountryCode
+		}
+
+		gatewayName, err = a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), room.ID, countryCode)
+		if err != nil {
+			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+			return
+		}
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
