@@ -19,6 +19,7 @@ import (
 	"github.com/volatiletech/sqlboiler/v4/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/errs"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
@@ -33,17 +34,20 @@ type SessionManager interface {
 }
 
 type V1SessionManager struct {
-	db      common.DBInterface
-	cache   *AppCache
-	cleaner *PeriodicSessionCleaner
+	db                          common.DBInterface
+	cache                       *AppCache
+	cleaner                     *PeriodicSessionCleaner
+	roomServerAssignmentManager *domain.RoomServerAssignmentManager
 }
 
-func NewV1SessionManager(db common.DBInterface, cache *AppCache) SessionManager {
-	return &V1SessionManager{
-		db:      db,
-		cache:   cache,
-		cleaner: NewPeriodicSessionCleaner(db),
+func NewV1SessionManager(db common.DBInterface, cache *AppCache, rsam *domain.RoomServerAssignmentManager) SessionManager {
+	sm := &V1SessionManager{
+		db:                          db,
+		cache:                       cache,
+		roomServerAssignmentManager: rsam,
 	}
+	sm.cleaner = NewPeriodicSessionCleaner(db, rsam)
+	return sm
 }
 
 func (sm *V1SessionManager) HandleEvent(ctx context.Context, event interface{}) error {
@@ -255,6 +259,14 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 		log.Ctx(ctx).Error().Err(err).Msg("SessionManager.closeSession json.Marshal")
 	}
 
+	// Get room_id before closing session to check for assignment cleanup
+	var roomID null.Int64
+	err = queries.Raw("SELECT room_id FROM sessions WHERE user_id = $1 AND removed_at IS NULL LIMIT 1", userID).
+		QueryRow(tx).Scan(&roomID)
+	if err != nil && err != sql.ErrNoRows {
+		log.Ctx(ctx).Error().Err(err).Msg("Failed to get room_id before closing session")
+	}
+
 	res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where user_id = $3 and removed_at is null",
 		string(b), time.Now().UTC(), userID,
 	).Exec(tx)
@@ -267,6 +279,22 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 		return pkgerr.Wrap(err, "db update session")
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
+
+	// Check if this was the last session in the room and cleanup assignment immediately
+	if sm.roomServerAssignmentManager != nil && roomID.Valid {
+		var activeCount int
+		err = queries.Raw("SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL", roomID.Int64).
+			QueryRow(tx).Scan(&activeCount)
+		if err == nil && activeCount == 0 {
+			// No more active sessions in this room, cleanup assignment immediately
+			_, err = queries.Raw("DELETE FROM room_server_assignments WHERE room_id = $1", roomID.Int64).Exec(tx)
+			if err != nil {
+				log.Ctx(ctx).Error().Err(err).Int64("room_id", roomID.Int64).Msg("Failed to cleanup room assignment")
+			} else {
+				log.Ctx(ctx).Info().Int64("room_id", roomID.Int64).Msg("Cleaned up room assignment immediately")
+			}
+		}
+	}
 
 	return nil
 }
@@ -287,6 +315,13 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 		boil.Blacklist(models.SessionColumns.CreatedAt, models.SessionColumns.Properties), boil.Infer())
 	if err != nil {
 		return pkgerr.Wrap(err, "db upsert")
+	}
+
+	// Update last_used_at for room server assignment
+	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.Int64); err != nil {
+			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
+		}
 	}
 
 	return nil
@@ -349,12 +384,16 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 }
 
 type PeriodicSessionCleaner struct {
-	ticker *time.Ticker
-	db     common.DBInterface
+	ticker                      *time.Ticker
+	db                          common.DBInterface
+	roomServerAssignmentManager *domain.RoomServerAssignmentManager
 }
 
-func NewPeriodicSessionCleaner(db common.DBInterface) *PeriodicSessionCleaner {
-	return &PeriodicSessionCleaner{db: db}
+func NewPeriodicSessionCleaner(db common.DBInterface, rsam *domain.RoomServerAssignmentManager) *PeriodicSessionCleaner {
+	return &PeriodicSessionCleaner{
+		db:                          db,
+		roomServerAssignmentManager: rsam,
+	}
 }
 
 func (psc *PeriodicSessionCleaner) Start() {
@@ -376,6 +415,7 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
+		psc.cleanRoomAssignments()
 	}
 }
 
@@ -474,5 +514,16 @@ func (psc *PeriodicSessionCleaner) clean() {
 			Int64("gateway", s.GatewayID.Int64).
 			Str("properties", string(s.Properties.JSON)).
 			Msg("PeriodicSessionCleaner revived")
+	}
+}
+
+func (psc *PeriodicSessionCleaner) cleanRoomAssignments() {
+	if psc.roomServerAssignmentManager == nil {
+		return
+	}
+
+	ctx := context.TODO()
+	if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
+		log.Error().Err(err).Msg("PeriodicSessionCleaner clean room assignments")
 	}
 }

@@ -32,6 +32,11 @@ type config struct {
 	MQTTPassword          string
 	MQTTSecure            bool
 	VHUrl                 string
+	AvailableJanusServers []string
+	MaxServerCapacity     int
+	AvgRoomOccupancy      int
+	ServerRegions         map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
+	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
 }
 
 func newConfig() *config {
@@ -58,6 +63,11 @@ func newConfig() *config {
 		MQTTPassword:          "",
 		MQTTSecure:            false,
 		VHUrl:                 "https://api.kli.one",
+		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
+		MaxServerCapacity:     400,
+		AvgRoomOccupancy:      10,
+		ServerRegions:         make(map[string][]string),
+		ScaleMode:             false, // default: use room's default gateway (legacy mode)
 	}
 }
 
@@ -160,5 +170,40 @@ func Init() {
 	}
 	if val := os.Getenv("VH_URL"); val != "" {
 		Config.VHUrl = val
+	}
+	if val := os.Getenv("AVAILABLE_JANUS_SERVERS"); val != "" {
+		Config.AvailableJanusServers = strings.Split(val, ",")
+	}
+	if val := os.Getenv("MAX_SERVER_CAPACITY"); val != "" {
+		pVal, err := strconv.Atoi(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.MaxServerCapacity = pVal
+	}
+	if val := os.Getenv("AVG_ROOM_OCCUPANCY"); val != "" {
+		pVal, err := strconv.Atoi(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.AvgRoomOccupancy = pVal
+	}
+	// Parse SERVER_REGIONS: format "IL:gxy1,gxy2;US:gxy3,gxy4;RU:gxy5,gxy6"
+	if val := os.Getenv("SERVER_REGIONS"); val != "" {
+		regions := strings.Split(val, ";")
+		for _, region := range regions {
+			parts := strings.Split(region, ":")
+			if len(parts) == 2 {
+				countryCode := strings.TrimSpace(parts[0])
+				servers := strings.Split(parts[1], ",")
+				for i := range servers {
+					servers[i] = strings.TrimSpace(servers[i])
+				}
+				Config.ServerRegions[countryCode] = servers
+			}
+		}
+	}
+	if val := os.Getenv("SCALE"); val != "" {
+		Config.ScaleMode = val == "true"
 	}
 }

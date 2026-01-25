@@ -29,6 +29,14 @@ func (s *ModelsSuite) CreateGateway() *models.Gateway {
 
 func (s *ModelsSuite) CreateGatewayP(gType string, adminUrl, adminPwd string) *models.Gateway {
 	name := fmt.Sprintf("gateway_%s", stringutil.GenerateName(4))
+	return s.CreateGatewayWithNameP(name, gType, adminUrl, adminPwd)
+}
+
+func (s *ModelsSuite) CreateGatewayWithName(name string) *models.Gateway {
+	return s.CreateGatewayWithNameP(name, common.GatewayTypeRooms, "admin_url", "janusoverlord")
+}
+
+func (s *ModelsSuite) CreateGatewayWithNameP(name string, gType string, adminUrl, adminPwd string) *models.Gateway {
 	pwdHash, err := bcrypt.GenerateFromPassword([]byte(name), bcrypt.MinCost)
 	s.Require().NoError(err)
 	encAdminPwd, err := crypt.Encrypt([]byte(adminPwd), common.Config.Secret)
