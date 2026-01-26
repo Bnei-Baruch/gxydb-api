@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"math/rand"
 	"net"
 	"time"
 
@@ -326,8 +324,8 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 		UserID:                userID,
 		RoomID:                null.StringFrom(fmt.Sprintf("%d", room.ID)),
 		GatewayID:             null.Int64From(gateway.ID),
-		GatewaySession:        null.Int64From(rand.Int63n(math.MaxInt32)),
-		GatewayHandle:         null.Int64From(rand.Int63n(math.MaxInt32)),
+		GatewaySession:        null.Int64From(user.Session),
+		GatewayHandle:         null.Int64From(user.Handle),
 		GatewayFeed:           null.StringFrom(user.RFID),
 		GatewayHandleTextroom: null.Int64From(user.TextroomHandle),
 		Display:               null.StringFrom(user.Display),

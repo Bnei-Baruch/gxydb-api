@@ -23,7 +23,7 @@ import (
 // RoomStatistic is an object representing the database table.
 type RoomStatistic struct {
 	RoomID string `boil:"room_id" json:"room_id" toml:"room_id" yaml:"room_id"`
-	OnAir  int   `boil:"on_air" json:"on_air" toml:"on_air" yaml:"on_air"`
+	OnAir  int    `boil:"on_air" json:"on_air" toml:"on_air" yaml:"on_air"`
 
 	R *roomStatisticR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L roomStatisticL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -290,7 +290,7 @@ func (roomStatisticL) LoadRoom(e boil.Executor, singular bool, maybeRoomStatisti
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if local.RoomID == foreign.ID {
+			if local.RoomID == fmt.Sprintf("%d", foreign.ID) {
 				local.R.Room = foreign
 				if foreign.R == nil {
 					foreign.R = &roomR{}
@@ -330,7 +330,7 @@ func (o *RoomStatistic) SetRoom(exec boil.Executor, insert bool, related *Room) 
 		return errors.Wrap(err, "failed to update local table")
 	}
 
-	o.RoomID = related.ID
+	o.RoomID = fmt.Sprintf("%d", related.ID)
 	if o.R == nil {
 		o.R = &roomStatisticR{
 			Room: related,

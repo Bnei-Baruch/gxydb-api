@@ -47,7 +47,8 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 			var roomID string
 			var numUsers int64
 			if err := rows.Scan(&roomID, &numUsers); err != nil {
-				return nil, err
+				httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+				return
 			}
 			roomCounts[roomID] = numUsers
 		}
@@ -462,7 +463,7 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 			}
 
 			cRooms[i] = &models.CompositesRoom{
-				RoomID:    room.ID,
+				RoomID:    fmt.Sprintf("%d", room.ID),
 				GatewayID: gateway.ID,
 				Position:  i + 1,
 			}

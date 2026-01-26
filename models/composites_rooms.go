@@ -22,10 +22,10 @@ import (
 
 // CompositesRoom is an object representing the database table.
 type CompositesRoom struct {
-	CompositeID int64 `boil:"composite_id" json:"composite_id" toml:"composite_id" yaml:"composite_id"`
+	CompositeID int64  `boil:"composite_id" json:"composite_id" toml:"composite_id" yaml:"composite_id"`
 	RoomID      string `boil:"room_id" json:"room_id" toml:"room_id" yaml:"room_id"`
-	GatewayID   int64 `boil:"gateway_id" json:"gateway_id" toml:"gateway_id" yaml:"gateway_id"`
-	Position    int   `boil:"position" json:"position" toml:"position" yaml:"position"`
+	GatewayID   int64  `boil:"gateway_id" json:"gateway_id" toml:"gateway_id" yaml:"gateway_id"`
+	Position    int    `boil:"position" json:"position" toml:"position" yaml:"position"`
 
 	R *compositesRoomR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L compositesRoomL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -593,7 +593,7 @@ func (compositesRoomL) LoadRoom(e boil.Executor, singular bool, maybeCompositesR
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if local.RoomID == foreign.ID {
+			if local.RoomID == fmt.Sprintf("%d", foreign.ID) {
 				local.R.Room = foreign
 				if foreign.R == nil {
 					foreign.R = &roomR{}
@@ -725,7 +725,7 @@ func (o *CompositesRoom) SetRoom(exec boil.Executor, insert bool, related *Room)
 		return errors.Wrap(err, "failed to update local table")
 	}
 
-	o.RoomID = related.ID
+	o.RoomID = fmt.Sprintf("%d", related.ID)
 	if o.R == nil {
 		o.R = &compositesRoomR{
 			Room: related,
