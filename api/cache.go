@@ -211,7 +211,7 @@ func (c *RoomCache) ByGatewayUID(uid string) (*models.Room, bool) {
 
 func (c *RoomCache) Set(room *models.Room) {
 	c.lock.Lock()
-	c.m[fmt.Sprintf("%d", room.GatewayUID)] = room
+	c.m[room.GatewayUID] = room
 	c.lock.Unlock()
 }
 
