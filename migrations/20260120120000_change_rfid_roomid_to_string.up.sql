@@ -1,8 +1,12 @@
--- IMPORTANT: Drop FOREIGN KEY constraints first before changing types
--- sessions.room_id will now store Janus room ID (gateway_uid), not internal rooms.id
-ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_room_id_fkey;
+-- IMPORTANT: Drop ALL FOREIGN KEY constraints first before changing types
+-- All room_id columns will now store Janus room ID (gateway_uid), not internal rooms.id
 
--- Drop index on room_id (will recreate after type change)
+-- Drop FK constraints
+ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_room_id_fkey;
+ALTER TABLE room_statistics DROP CONSTRAINT IF EXISTS room_statistics_room_id_fkey;
+ALTER TABLE composites_rooms DROP CONSTRAINT IF EXISTS composites_rooms_room_id_fkey;
+
+-- Drop indexes (will recreate after type change)
 DROP INDEX IF EXISTS sessions_room_id_idx;
 
 -- Изменяем тип room_id в таблице sessions
