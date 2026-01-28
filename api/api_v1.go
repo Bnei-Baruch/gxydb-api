@@ -382,9 +382,6 @@ func (a *App) V1UpdateSession(w http.ResponseWriter, r *http.Request) {
 func (a *App) V1ListComposites(w http.ResponseWriter, r *http.Request) {
 	composites, err := models.Composites(
 		qm.Load(models.CompositeRels.CompositesRooms, qm.OrderBy(models.CompositesRoomColumns.Position)),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room),
-			models.RoomWhere.Disabled.EQ(false),
-			models.RoomWhere.RemovedAt.IsNull()),
 	).All(a.DB)
 
 	if err != nil {
@@ -411,13 +408,6 @@ func (a *App) V1GetComposite(w http.ResponseWriter, r *http.Request) {
 	composite, err := models.Composites(
 		models.CompositeWhere.Name.EQ(id),
 		qm.Load(models.CompositeRels.CompositesRooms),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room),
-			models.RoomWhere.Disabled.EQ(false),
-			models.RoomWhere.RemovedAt.IsNull()),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions),
-			models.SessionWhere.RemovedAt.IsNull(), qm.OrderBy(models.SessionColumns.CreatedAt)),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions, models.SessionRels.User)),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions, models.SessionRels.Gateway)),
 	).One(a.DB)
 
 	if err != nil {
@@ -693,9 +683,14 @@ func (a *App) makeV1Composite(composite *models.Composite) *V1Composite {
 	}
 
 	for i, cRoom := range composite.R.CompositesRooms {
-		room := cRoom.R.Room
+		// Load room from cache (no FK relationship exists, cRoom.RoomID is now gateway_uid)
+		room, ok := a.cache.rooms.ByGatewayUID(cRoom.RoomID)
+		if !ok {
+			log.Warn().Str("room_id", cRoom.RoomID).Msg("Room not found for composite room")
+			continue
+		}
 		
-		// Load sessions manually for this room (no FK relationship exists)
+		// Load sessions manually for this room
 		sessions, err := models.Sessions(
 			models.SessionWhere.RoomID.EQ(null.StringFrom(room.GatewayUID)),
 			models.SessionWhere.RemovedAt.IsNull(),
