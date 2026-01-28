@@ -273,7 +273,13 @@ func (a *App) V1ListUsers(w http.ResponseWriter, r *http.Request) {
 	respSessions := make(map[string]*V1User, len(sessions))
 	for i := range sessions {
 		session := sessions[i]
-		respSessions[session.R.User.AccountsID] = a.makeV1User(session.R.Room, session)
+		// Load room from cache using session.RoomID (which now contains gateway_uid)
+		room, ok := a.cache.rooms.ByGatewayUID(session.RoomID.String)
+		if !ok {
+			log.Warn().Str("room_id", session.RoomID.String).Msg("Room not found for session")
+			continue
+		}
+		respSessions[session.R.User.AccountsID] = a.makeV1User(room, session)
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, respSessions)
@@ -309,7 +315,6 @@ func (a *App) V1GetUser(w http.ResponseWriter, r *http.Request) {
 		models.SessionWhere.RemovedAt.IsNull(),
 		qm.OrderBy(fmt.Sprintf("%s desc", models.SessionColumns.UpdatedAt)),
 		qm.Load(models.SessionRels.User),
-		qm.Load(models.SessionRels.Room),
 	).One(a.DB)
 
 	if err != nil {
@@ -321,7 +326,14 @@ func (a *App) V1GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.RespondWithJSON(w, http.StatusOK, a.makeV1User(session.R.Room, session))
+	// Load room from cache using session.RoomID (which now contains gateway_uid)
+	room, ok := a.cache.rooms.ByGatewayUID(session.RoomID.String)
+	if !ok {
+		httputil.NewInternalError(errors.New("room not found")).Abort(w, r)
+		return
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, a.makeV1User(room, session))
 }
 
 func (a *App) V1UpdateSession(w http.ResponseWriter, r *http.Request) {

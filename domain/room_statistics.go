@@ -35,7 +35,9 @@ func (m *RoomStatisticsManager) OnAir(roomID string) error {
 }
 
 func (m *RoomStatisticsManager) GetAll() ([]*models.RoomStatistic, error) {
-	return models.RoomStatistics(qm.Load(models.RoomStatisticRels.Room)).All(m.db)
+	// Note: Room relationship no longer exists (room_id is string gateway_uid, no FK constraint)
+	// Load rooms manually if needed
+	return models.RoomStatistics().All(m.db)
 }
 
 func (m *RoomStatisticsManager) Reset(ctx context.Context) error {
