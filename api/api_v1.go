@@ -153,7 +153,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 	for _, room := range rooms {
 		// Load sessions manually (no FK relationship exists)
 		sessionCount, err := models.Sessions(
-			models.SessionWhere.RoomID.EQ(room.GatewayUID),
+			models.SessionWhere.RoomID.EQ(null.StringFrom(room.GatewayUID)),
 			models.SessionWhere.RemovedAt.IsNull(),
 		).Count(a.DB)
 		
@@ -161,7 +161,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		respRooms = append(respRooms, a.makeV1Room(room, nil))
+		respRooms = append(respRooms, a.makeV1Room(room, []*models.Session{}))
 	}
 
 	sort.Slice(respRooms, func(i, j int) bool {
@@ -189,9 +189,6 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 		models.RoomWhere.ID.EQ(cachedRoom.ID),
 		models.RoomWhere.Disabled.EQ(false),
 		models.RoomWhere.RemovedAt.IsNull(),
-		qm.Load(models.RoomRels.Sessions, models.SessionWhere.RemovedAt.IsNull(), qm.OrderBy(models.SessionColumns.CreatedAt)),
-		qm.Load(qm.Rels(models.RoomRels.Sessions, models.SessionRels.User)),
-		qm.Load(qm.Rels(models.RoomRels.Sessions, models.SessionRels.Gateway)),
 	).One(a.DB)
 
 	if err != nil {
@@ -203,7 +200,21 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respRoom := a.makeV1Room(room, nil)
+	// Load sessions manually (no FK relationship exists)
+	sessions, err := models.Sessions(
+		models.SessionWhere.RoomID.EQ(null.StringFrom(room.GatewayUID)),
+		models.SessionWhere.RemovedAt.IsNull(),
+		qm.Load(models.SessionRels.User),
+		qm.Load(models.SessionRels.Gateway),
+		qm.OrderBy(models.SessionColumns.CreatedAt),
+	).All(a.DB)
+	
+	if err != nil {
+		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		return
+	}
+
+	respRoom := a.makeV1Room(room, sessions)
 	httputil.RespondWithJSON(w, http.StatusOK, respRoom)
 }
 
@@ -264,7 +275,6 @@ func (a *App) V1ListUsers(w http.ResponseWriter, r *http.Request) {
 	sessions, err := models.Sessions(
 		models.SessionWhere.RemovedAt.IsNull(),
 		qm.Load(models.SessionRels.User),
-		qm.Load(models.SessionRels.Room),
 	).All(a.DB)
 
 	if err != nil {
@@ -375,10 +385,6 @@ func (a *App) V1ListComposites(w http.ResponseWriter, r *http.Request) {
 		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room),
 			models.RoomWhere.Disabled.EQ(false),
 			models.RoomWhere.RemovedAt.IsNull()),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions),
-			models.SessionWhere.RemovedAt.IsNull(), qm.OrderBy(models.SessionColumns.CreatedAt)),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions, models.SessionRels.User)),
-		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room, models.RoomRels.Sessions, models.SessionRels.Gateway)),
 	).All(a.DB)
 
 	if err != nil {
@@ -626,23 +632,21 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 	return user
 }
 
-func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
-	if gateway == nil {
-		gateway, _ = a.cache.gateways.ByID(room.DefaultGatewayID)
-	}
+func (a *App) makeV1Room(room *models.Room, sessions []*models.Session) *V1Room {
+	gateway, _ := a.cache.gateways.ByID(room.DefaultGatewayID)
 	respRoom := &V1Room{
 		V1RoomInfo: V1RoomInfo{
-			Room:        fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
+			Room:        room.GatewayUID, // Already a string after migration
 			Janus:       gateway.Name,
 			Description: room.Name,
 		},
 		Region: room.Region.String,
 	}
 
-	if room.R.Sessions != nil {
-		sessions := make(map[int64]*models.Session)
-		for _, session := range room.R.Sessions {
-			if s, ok := sessions[session.UserID]; ok {
+	if sessions != nil && len(sessions) > 0 {
+		sessionMap := make(map[int64]*models.Session)
+		for _, session := range sessions {
+			if s, ok := sessionMap[session.UserID]; ok {
 				// take most active session for user
 				tsA := s.CreatedAt
 				if s.UpdatedAt.Valid {
@@ -654,17 +658,17 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 					tsB = session.UpdatedAt.Time
 				}
 				if tsA.Before(tsB) {
-					sessions[session.UserID] = session
+					sessionMap[session.UserID] = session
 				}
 			} else {
-				sessions[session.UserID] = session
+				sessionMap[session.UserID] = session
 			}
 		}
 
-		respRoom.NumUsers = len(sessions)
+		respRoom.NumUsers = len(sessionMap)
 		respRoom.Users = make([]*V1User, respRoom.NumUsers)
 		i := 0
-		for _, session := range sessions {
+		for _, session := range sessionMap {
 			if session.Question {
 				respRoom.Questions = true
 			}
@@ -690,9 +694,23 @@ func (a *App) makeV1Composite(composite *models.Composite) *V1Composite {
 
 	for i, cRoom := range composite.R.CompositesRooms {
 		room := cRoom.R.Room
-		gateway, _ := a.cache.gateways.ByID(cRoom.GatewayID)
+		
+		// Load sessions manually for this room (no FK relationship exists)
+		sessions, err := models.Sessions(
+			models.SessionWhere.RoomID.EQ(null.StringFrom(room.GatewayUID)),
+			models.SessionWhere.RemovedAt.IsNull(),
+			qm.Load(models.SessionRels.User),
+			qm.Load(models.SessionRels.Gateway),
+			qm.OrderBy(models.SessionColumns.CreatedAt),
+		).All(a.DB)
+		
+		if err != nil {
+			log.Error().Err(err).Str("room_gateway_uid", room.GatewayUID).Msg("Failed to load sessions for composite room")
+			sessions = []*models.Session{} // Empty sessions on error
+		}
+		
 		respComposite.VQuad[i] = &V1CompositeRoom{
-			V1Room:   *a.makeV1Room(room, gateway),
+			V1Room:   *a.makeV1Room(room, sessions),
 			Position: cRoom.Position,
 		}
 	}
