@@ -117,7 +117,7 @@ func (a *App) V1CreateGroup(w http.ResponseWriter, r *http.Request) {
 	room := models.Room{
 		Name:             data.Description,
 		DefaultGatewayID: gateway.ID,
-		GatewayUID:       id,
+		GatewayUID:       fmt.Sprintf("%d", id),
 	}
 
 	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
@@ -142,8 +142,6 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 	rooms, err := models.Rooms(
 		models.RoomWhere.Disabled.EQ(false),
 		models.RoomWhere.RemovedAt.IsNull(),
-		qm.Load(models.RoomRels.Sessions, models.SessionWhere.RemovedAt.IsNull()),
-		qm.Load(qm.Rels(models.RoomRels.Sessions, models.SessionRels.User)),
 	).All(a.DB)
 
 	if err != nil {
@@ -153,9 +151,13 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 
 	respRooms := make([]*V1Room, 0)
 	for _, room := range rooms {
-
-		// TODO: maybe move this into DB query above for performance reasons ?
-		if len(room.R.Sessions) == 0 {
+		// Load sessions manually (no FK relationship exists)
+		sessionCount, err := models.Sessions(
+			models.SessionWhere.RoomID.EQ(room.GatewayUID),
+			models.SessionWhere.RemovedAt.IsNull(),
+		).Count(a.DB)
+		
+		if err != nil || sessionCount == 0 {
 			continue
 		}
 
