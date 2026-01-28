@@ -22,8 +22,8 @@ import (
 
 // RoomStatistic is an object representing the database table.
 type RoomStatistic struct {
-	RoomID int64 `boil:"room_id" json:"room_id" toml:"room_id" yaml:"room_id"`
-	OnAir  int   `boil:"on_air" json:"on_air" toml:"on_air" yaml:"on_air"`
+	RoomID string `boil:"room_id" json:"room_id" toml:"room_id" yaml:"room_id"`
+	OnAir  int    `boil:"on_air" json:"on_air" toml:"on_air" yaml:"on_air"`
 
 	R *roomStatisticR `boil:"-" json:"-" toml:"-" yaml:"-"`
 	L roomStatisticL  `boil:"-" json:"-" toml:"-" yaml:"-"`
@@ -48,10 +48,10 @@ var RoomStatisticTableColumns = struct {
 // Generated where
 
 var RoomStatisticWhere = struct {
-	RoomID whereHelperint64
+	RoomID whereHelperstring
 	OnAir  whereHelperint
 }{
-	RoomID: whereHelperint64{field: "\"room_statistics\".\"room_id\""},
+	RoomID: whereHelperstring{field: "\"room_statistics\".\"room_id\""},
 	OnAir:  whereHelperint{field: "\"room_statistics\".\"on_air\""},
 }
 
@@ -290,7 +290,7 @@ func (roomStatisticL) LoadRoom(e boil.Executor, singular bool, maybeRoomStatisti
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if local.RoomID == foreign.ID {
+			if local.RoomID == fmt.Sprintf("%d", foreign.ID) {
 				local.R.Room = foreign
 				if foreign.R == nil {
 					foreign.R = &roomR{}
@@ -330,7 +330,7 @@ func (o *RoomStatistic) SetRoom(exec boil.Executor, insert bool, related *Room) 
 		return errors.Wrap(err, "failed to update local table")
 	}
 
-	o.RoomID = related.ID
+	o.RoomID = fmt.Sprintf("%d", related.ID)
 	if o.R == nil {
 		o.R = &roomStatisticR{
 			Room: related,
@@ -363,7 +363,7 @@ func RoomStatistics(mods ...qm.QueryMod) roomStatisticQuery {
 
 // FindRoomStatistic retrieves a single record by ID with an executor.
 // If selectCols is empty Find will return all columns.
-func FindRoomStatistic(exec boil.Executor, roomID int64, selectCols ...string) (*RoomStatistic, error) {
+func FindRoomStatistic(exec boil.Executor, roomID string, selectCols ...string) (*RoomStatistic, error) {
 	roomStatisticObj := &RoomStatistic{}
 
 	sel := "*"
@@ -819,7 +819,7 @@ func (o *RoomStatisticSlice) ReloadAll(exec boil.Executor) error {
 }
 
 // RoomStatisticExists checks if the RoomStatistic row exists.
-func RoomStatisticExists(exec boil.Executor, roomID int64) (bool, error) {
+func RoomStatisticExists(exec boil.Executor, roomID string) (bool, error) {
 	var exists bool
 	sql := "select exists(select 1 from \"room_statistics\" where \"room_id\"=$1 limit 1)"
 

@@ -532,7 +532,7 @@ func (roomL) LoadRoomStatistic(e boil.Executor, singular bool, maybeRoom interfa
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if local.ID == foreign.RoomID {
+			if fmt.Sprintf("%d", local.ID) == foreign.RoomID {
 				local.R.RoomStatistic = foreign
 				if foreign.R == nil {
 					foreign.R = &roomStatisticR{}
@@ -638,7 +638,7 @@ func (roomL) LoadCompositesRooms(e boil.Executor, singular bool, maybeRoom inter
 
 	for _, foreign := range resultSlice {
 		for _, local := range slice {
-			if local.ID == foreign.RoomID {
+			if fmt.Sprintf("%d", local.ID) == foreign.RoomID {
 				local.R.CompositesRooms = append(local.R.CompositesRooms, foreign)
 				if foreign.R == nil {
 					foreign.R = &compositesRoomR{}
@@ -811,7 +811,7 @@ func (o *Room) SetRoomStatistic(exec boil.Executor, insert bool, related *RoomSt
 	var err error
 
 	if insert {
-		related.RoomID = o.ID
+		related.RoomID = fmt.Sprintf("%d", o.ID)
 
 		if err = related.Insert(exec, boil.Infer()); err != nil {
 			return errors.Wrap(err, "failed to insert into foreign table")
@@ -822,7 +822,7 @@ func (o *Room) SetRoomStatistic(exec boil.Executor, insert bool, related *RoomSt
 			strmangle.SetParamNames("\"", "\"", 1, []string{"room_id"}),
 			strmangle.WhereClause("\"", "\"", 2, roomStatisticPrimaryKeyColumns),
 		)
-		values := []interface{}{o.ID, related.RoomID}
+		values := []interface{}{fmt.Sprintf("%d", o.ID), related.RoomID}
 
 		if boil.DebugMode {
 			fmt.Fprintln(boil.DebugWriter, updateQuery)
@@ -832,7 +832,7 @@ func (o *Room) SetRoomStatistic(exec boil.Executor, insert bool, related *RoomSt
 			return errors.Wrap(err, "failed to update foreign table")
 		}
 
-		related.RoomID = o.ID
+		related.RoomID = fmt.Sprintf("%d", o.ID)
 	}
 
 	if o.R == nil {
@@ -861,7 +861,7 @@ func (o *Room) AddCompositesRooms(exec boil.Executor, insert bool, related ...*C
 	var err error
 	for _, rel := range related {
 		if insert {
-			rel.RoomID = o.ID
+			rel.RoomID = fmt.Sprintf("%d", o.ID)
 			if err = rel.Insert(exec, boil.Infer()); err != nil {
 				return errors.Wrap(err, "failed to insert into foreign table")
 			}
@@ -871,7 +871,7 @@ func (o *Room) AddCompositesRooms(exec boil.Executor, insert bool, related ...*C
 				strmangle.SetParamNames("\"", "\"", 1, []string{"room_id"}),
 				strmangle.WhereClause("\"", "\"", 2, compositesRoomPrimaryKeyColumns),
 			)
-			values := []interface{}{o.ID, rel.CompositeID, rel.RoomID, rel.GatewayID, rel.Position}
+			values := []interface{}{fmt.Sprintf("%d", o.ID), rel.CompositeID, rel.RoomID, rel.GatewayID, rel.Position}
 
 			if boil.DebugMode {
 				fmt.Fprintln(boil.DebugWriter, updateQuery)
@@ -881,7 +881,7 @@ func (o *Room) AddCompositesRooms(exec boil.Executor, insert bool, related ...*C
 				return errors.Wrap(err, "failed to update foreign table")
 			}
 
-			rel.RoomID = o.ID
+			rel.RoomID = fmt.Sprintf("%d", o.ID)
 		}
 	}
 

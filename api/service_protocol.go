@@ -43,7 +43,7 @@ func (h *V1ServiceProtocolHandler) HandleMessage(payload string) error {
 				return NewProtocolError(fmt.Sprintf("unknown room %d", *pMsg.Room))
 			}
 
-			if err := h.roomsStatisticsManager.OnAir(room.ID); err != nil {
+			if err := h.roomsStatisticsManager.OnAir(fmt.Sprintf("%d", room.ID)); err != nil {
 				return pkgerr.Wrap(err, "roomsStatisticsManager.OnAir")
 			}
 		}
