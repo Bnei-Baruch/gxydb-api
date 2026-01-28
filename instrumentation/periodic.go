@@ -52,7 +52,7 @@ func (pc *PeriodicCollector) run() {
 
 func (pc *PeriodicCollector) collectRoomParticipants() {
 	rows, err := queries.Raw(`select r.name, count(distinct s.user_id)
-										from sessions s inner join rooms r on s.room_id = r.id
+										from sessions s inner join rooms r on s.room_id = r.gateway_uid
 										where s.removed_at is null
 										group by r.id;`).Query(pc.db)
 	if err != nil {
