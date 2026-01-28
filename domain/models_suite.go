@@ -73,7 +73,7 @@ func (s *ModelsSuite) CreateRoom(gateway *models.Gateway) *models.Room {
 	room := &models.Room{
 		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
 		DefaultGatewayID: gateway.ID,
-		GatewayUID:       rand.Intn(math.MaxInt32),
+		GatewayUID:       rand.Intn(math.MaxInt32), // Note: GatewayUID is now string in DB but SQLBoiler still generates as int
 	}
 	s.Require().NoError(room.Insert(s.DB, boil.Infer()))
 	return room
