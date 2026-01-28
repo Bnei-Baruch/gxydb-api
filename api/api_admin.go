@@ -258,7 +258,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 	} else if data.GatewayUID < 0 {
 		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
 		return
-	} else if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
+	} else if _, ok := a.cache.rooms.ByGatewayUID(fmt.Sprintf("%d", data.GatewayUID)); ok {
 		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
 		return
 	}

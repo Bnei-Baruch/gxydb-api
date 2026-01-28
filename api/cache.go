@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/sqlboiler/v4/queries/qm"
@@ -177,7 +177,7 @@ func (c *GatewayTokenCache) ByID(id int64) (string, bool) {
 }
 
 type RoomCache struct {
-	m    map[int]*models.Room
+	m    map[string]*models.Room // Key is Janus room ID (gateway_uid) as string
 	lock sync.RWMutex
 }
 
@@ -193,15 +193,16 @@ func (c *RoomCache) Reload(db common.DBInterface) error {
 		return pkgerr.WithStack(err)
 	}
 
-	c.m = make(map[int]*models.Room, len(rooms))
+	c.m = make(map[string]*models.Room, len(rooms))
 	for _, room := range rooms {
-		c.m[room.GatewayUID] = room
+		// Convert gateway_uid (int) to string for Janus string ID support
+		c.m[fmt.Sprintf("%d", room.GatewayUID)] = room
 	}
 
 	return nil
 }
 
-func (c *RoomCache) ByGatewayUID(uid int) (*models.Room, bool) {
+func (c *RoomCache) ByGatewayUID(uid string) (*models.Room, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	r, ok := c.m[uid]
@@ -210,7 +211,7 @@ func (c *RoomCache) ByGatewayUID(uid int) (*models.Room, bool) {
 
 func (c *RoomCache) Set(room *models.Room) {
 	c.lock.Lock()
-	c.m[room.GatewayUID] = room
+	c.m[fmt.Sprintf("%d", room.GatewayUID)] = room
 	c.lock.Unlock()
 }
 

@@ -14,7 +14,7 @@ import (
 )
 
 type RoomServerAssignment struct {
-	RoomID      int64
+	RoomID      string // Janus room ID (gateway_uid), e.g. "2171"
 	GatewayName string
 	Region      string
 	AssignedAt  time.Time
@@ -27,26 +27,27 @@ type ServerLoad struct {
 }
 
 type RoomServerAssignmentManager struct {
-	db                 common.DBInterface
-	availableServers   []string
-	maxServerCapacity  int
-	avgRoomOccupancy   int
-	serverRegions      map[string][]string
+	db                common.DBInterface
+	availableServers  []string
+	maxServerCapacity int
+	avgRoomOccupancy  int
+	serverRegions     map[string][]string
 }
 
 func NewRoomServerAssignmentManager(db common.DBInterface, servers []string, maxCapacity, avgOccupancy int, regions map[string][]string) *RoomServerAssignmentManager {
 	return &RoomServerAssignmentManager{
-		db:                 db,
-		availableServers:   servers,
-		maxServerCapacity:  maxCapacity,
-		avgRoomOccupancy:   avgOccupancy,
-		serverRegions:      regions,
+		db:                db,
+		availableServers:  servers,
+		maxServerCapacity: maxCapacity,
+		avgRoomOccupancy:  avgOccupancy,
+		serverRegions:     regions,
 	}
 }
 
 // GetOrAssignServer returns the assigned server for a room or assigns a new one
+// roomID is Janus room ID (gateway_uid), e.g. "2171"
 // countryCode is used for regional routing (only for first assignment)
-func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roomID int64, countryCode string) (string, error) {
+func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roomID string, countryCode string) (string, error) {
 	// First, check if there's already an assignment
 	var gatewayName string
 	err := queries.Raw(
@@ -92,7 +93,7 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 	}
 
 	log.Ctx(ctx).Info().
-		Int64("room_id", roomID).
+		Str("room_id", roomID).
 		Str("gateway_name", selectedServer).
 		Str("country_code", countryCode).
 		Bool("regional_match", len(preferredServers) > 0).
@@ -106,11 +107,11 @@ func (m *RoomServerAssignmentManager) getPreferredServers(countryCode string) []
 	if countryCode == "" {
 		return nil
 	}
-	
+
 	if servers, ok := m.serverRegions[countryCode]; ok {
 		return servers
 	}
-	
+
 	return nil
 }
 
@@ -180,7 +181,7 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 				selectedServer = server
 			}
 		}
-		
+
 		// If we found a regional server, use it
 		if selectedServer != "" {
 			return selectedServer
@@ -201,7 +202,7 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 }
 
 // UpdateLastUsed updates the last_used_at timestamp for a room assignment
-func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID int64) error {
+func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID string) error {
 	_, err := queries.Raw(
 		"UPDATE room_server_assignments SET last_used_at = $1 WHERE room_id = $2",
 		time.Now().UTC(), roomID,

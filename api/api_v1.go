@@ -73,7 +73,7 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 
 		roomInfos[i] = &V1Room{
 			V1RoomInfo: V1RoomInfo{
-				Room:        room.GatewayUID,
+				Room:        fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
 				Janus:       gateway.Name,
 				Description: room.Name,
 			},
@@ -177,7 +177,7 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cachedRoom, ok := a.cache.rooms.ByGatewayUID(id)
+	cachedRoom, ok := a.cache.rooms.ByGatewayUID(fmt.Sprintf("%d", id))
 	if !ok {
 		httputil.NewNotFoundError().Abort(w, r)
 		return
@@ -218,7 +218,7 @@ func (a *App) V1UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	room, ok := a.cache.rooms.ByGatewayUID(id)
+	room, ok := a.cache.rooms.ByGatewayUID(fmt.Sprintf("%d", id))
 	if !ok {
 		httputil.NewNotFoundError().Abort(w, r)
 		return
@@ -459,7 +459,7 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 			}
 			room, ok := a.cache.rooms.ByGatewayUID(item.Room)
 			if !ok {
-				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %d", item.Room))
+				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %s", item.Room))
 			}
 
 			cRooms[i] = &models.CompositesRoom{
@@ -587,9 +587,9 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Name:           "",     // Useless. Shouldn't be used on the client side.
 		Role:           "user", // fixed. No more "groups" only "users"
 		System:         session.UserAgent.String,
-		Username:       session.R.User.Username.String, // Useless. Never seen a value here
-		Room:           room.GatewayUID,
-		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
+		Username:       session.R.User.Username.String,     // Useless. Never seen a value here
+		Room:           fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
+		Timestamp:      session.CreatedAt.Unix(),           // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,
 		RFID:           session.GatewayFeed.String,
@@ -618,7 +618,7 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 	}
 	respRoom := &V1Room{
 		V1RoomInfo: V1RoomInfo{
-			Room:        room.GatewayUID,
+			Room:        fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
 			Janus:       gateway.Name,
 			Description: room.Name,
 		},
