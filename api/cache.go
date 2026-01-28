@@ -195,8 +195,8 @@ func (c *RoomCache) Reload(db common.DBInterface) error {
 
 	c.m = make(map[string]*models.Room, len(rooms))
 	for _, room := range rooms {
-		// Convert gateway_uid (int) to string for Janus string ID support
-		c.m[fmt.Sprintf("%d", room.GatewayUID)] = room
+		// gateway_uid is already string after migration
+		c.m[room.GatewayUID] = room
 	}
 
 	return nil

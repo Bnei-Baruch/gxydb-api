@@ -73,11 +73,11 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 
 		roomInfos[i] = &V1Room{
 			V1RoomInfo: V1RoomInfo{
-				Room:        fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
+				Room:        room.GatewayUID, // Already string after migration
 				Janus:       gateway.Name,
 				Description: room.Name,
 			},
-			NumUsers: int(roomCounts[fmt.Sprintf("%d", room.GatewayUID)]),
+			NumUsers: int(roomCounts[room.GatewayUID]),
 		}
 	}
 
@@ -598,7 +598,7 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Role:           "user", // fixed. No more "groups" only "users"
 		System:         session.UserAgent.String,
 		Username:       session.R.User.Username.String,     // Useless. Never seen a value here
-		Room:           fmt.Sprintf("%d", room.GatewayUID), // Convert int to string for Janus string ID support
+		Room:           room.GatewayUID, // Already string after migration
 		Timestamp:      session.CreatedAt.Unix(),           // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,

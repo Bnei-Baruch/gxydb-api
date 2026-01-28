@@ -161,7 +161,7 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Use Janus room ID (gateway_uid), not internal rooms.id
-		janusRoomID := fmt.Sprintf("%d", room.GatewayUID)
+		janusRoomID := room.GatewayUID // Already string after migration
 		gatewayName, err = a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), janusRoomID, countryCode)
 		if err != nil {
 			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
