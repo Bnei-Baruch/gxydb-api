@@ -154,12 +154,12 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 	return loads, nil
 }
 
-// selectLeastLoadedServer picks the server with the lowest load
+// selectLeastLoadedServer picks the server to fill sequentially
+// Strategy: fill servers one by one to maxServerCapacity, then move to next
 // If preferredServers is provided, it will try to select from those first
-// Respects maxServerCapacity limit
 func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]int, preferredServers []string) string {
 	var selectedServer string
-	minLoad := -1
+	maxLoad := -1
 
 	// First, try to select from preferred servers (regional)
 	if len(preferredServers) > 0 {
@@ -182,8 +182,9 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 				continue
 			}
 			
-			if minLoad == -1 || load < minLoad {
-				minLoad = load
+			// Select server with MAXIMUM load (to fill it first)
+			if maxLoad == -1 || load > maxLoad {
+				maxLoad = load
 				selectedServer = server
 			}
 		}
@@ -195,7 +196,7 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 	}
 
 	// No preferred servers or all are at capacity - select from all available
-	minLoad = -1
+	maxLoad = -1
 	for _, server := range m.availableServers {
 		load := loads[server]
 		// Check if server has capacity for one more room
@@ -203,15 +204,16 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 			continue
 		}
 		
-		if minLoad == -1 || load < minLoad {
-			minLoad = load
+		// Select server with MAXIMUM load (to fill it first)
+		if maxLoad == -1 || load > maxLoad {
+			maxLoad = load
 			selectedServer = server
 		}
 	}
 
 	// If all servers are at capacity, select least loaded anyway (fallback)
 	if selectedServer == "" {
-		minLoad = -1
+		minLoad := -1
 		for _, server := range m.availableServers {
 			load := loads[server]
 			if minLoad == -1 || load < minLoad {
