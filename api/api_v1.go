@@ -151,6 +151,22 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load dynamic assignments from room_server_assignments (Scale Mode)
+	assignments := make(map[int64]string) // room_id -> gateway_name
+	if common.Config.ScaleMode {
+		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var roomID int64
+				var gatewayName string
+				if err := rows.Scan(&roomID, &gatewayName); err == nil {
+					assignments[roomID] = gatewayName
+				}
+			}
+		}
+	}
+
 	respRooms := make([]*V1Room, 0)
 	for _, room := range rooms {
 
@@ -159,7 +175,13 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		respRooms = append(respRooms, a.makeV1Room(room, nil))
+		// Use dynamic assignment if exists, otherwise use default gateway
+		var gateway *models.Gateway
+		if gatewayName, ok := assignments[room.ID]; ok {
+			gateway, _ = a.cache.gateways.ByName(gatewayName)
+		}
+
+		respRooms = append(respRooms, a.makeV1Room(room, gateway))
 	}
 
 	sort.Slice(respRooms, func(i, j int) bool {
@@ -201,7 +223,17 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respRoom := a.makeV1Room(room, nil)
+	// Check for dynamic assignment (Scale Mode)
+	var gateway *models.Gateway
+	if common.Config.ScaleMode {
+		var gatewayName string
+		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.ID).Scan(&gatewayName)
+		if err == nil {
+			gateway, _ = a.cache.gateways.ByName(gatewayName)
+		}
+	}
+
+	respRoom := a.makeV1Room(room, gateway)
 	httputil.RespondWithJSON(w, http.StatusOK, respRoom)
 }
 
