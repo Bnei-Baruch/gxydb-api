@@ -280,21 +280,8 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
 
-	// Check if this was the last session in the room and cleanup assignment immediately
-	if sm.roomServerAssignmentManager != nil && roomID.Valid {
-		var activeCount int
-		err = queries.Raw("SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL", roomID.Int64).
-			QueryRow(tx).Scan(&activeCount)
-		if err == nil && activeCount == 0 {
-			// No more active sessions in this room, cleanup assignment immediately
-			_, err = queries.Raw("DELETE FROM room_server_assignments WHERE room_id = $1", roomID.Int64).Exec(tx)
-			if err != nil {
-				log.Ctx(ctx).Error().Err(err).Int64("room_id", roomID.Int64).Msg("Failed to cleanup room assignment")
-			} else {
-				log.Ctx(ctx).Info().Int64("room_id", roomID.Int64).Msg("Cleaned up room assignment immediately")
-			}
-		}
-	}
+	// Note: Room assignments cleanup is handled by PeriodicSessionCleaner.cleanRoomAssignments()
+	// This prevents race conditions during user reconnections.
 
 	return nil
 }
