@@ -241,16 +241,24 @@ func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID
 }
 
 // CleanInactiveAssignments removes assignments for rooms with no active sessions
+// Uses the same "active session" criteria as PeriodicSessionCleaner:
+//  - removed_at IS NULL
+//  - updated_at >= NOW() - DeadSessionPeriod
 func (m *RoomServerAssignmentManager) CleanInactiveAssignments(ctx context.Context) error {
-	// Delete assignments where there are no active sessions in the room
+	// Calculate the cutoff time using the same logic as PeriodicSessionCleaner
+	cutoffTime := time.Now().Add(-common.Config.DeadSessionPeriod)
+	
+	// Delete assignments where there are no ACTIVE sessions in the room
+	// Active = removed_at IS NULL AND updated_at >= cutoff
 	res, err := queries.Raw(`
 		DELETE FROM room_server_assignments rsa
 		WHERE NOT EXISTS (
 			SELECT 1 FROM sessions s 
 			WHERE s.room_id = rsa.room_id 
 			AND s.removed_at IS NULL
+			AND s.updated_at >= $1
 		)
-	`).Exec(m.db)
+	`, cutoffTime).Exec(m.db)
 
 	if err != nil {
 		return pkgerr.Wrap(err, "clean inactive assignments")
