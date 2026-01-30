@@ -114,7 +114,8 @@ func (m *RoomServerAssignmentManager) getPreferredServers(countryCode string) []
 	return nil
 }
 
-// getServerLoads calculates current load for each available server
+// getServerLoads calculates estimated load for each available server
+// Load is calculated as: number_of_rooms * avgRoomOccupancy
 func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[string]int, error) {
 	loads := make(map[string]int)
 
@@ -123,13 +124,12 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 		loads[server] = 0
 	}
 
-	// Count active sessions per gateway
+	// Count assigned rooms per server
 	rows, err := queries.Raw(`
-		SELECT g.name, COUNT(DISTINCT s.user_id) as load
-		FROM gateways g
-		LEFT JOIN sessions s ON s.gateway_id = g.id AND s.removed_at IS NULL
-		WHERE g.name = ANY($1) AND g.disabled = false AND g.removed_at IS NULL
-		GROUP BY g.name
+		SELECT gateway_name, COUNT(*) as room_count
+		FROM room_server_assignments
+		WHERE gateway_name = ANY($1)
+		GROUP BY gateway_name
 	`, "{"+strings.Join(m.availableServers, ",")+"}").Query(m.db)
 
 	if err != nil {
@@ -139,11 +139,12 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 
 	for rows.Next() {
 		var name string
-		var load int
-		if err := rows.Scan(&name, &load); err != nil {
+		var roomCount int
+		if err := rows.Scan(&name, &roomCount); err != nil {
 			return nil, pkgerr.Wrap(err, "scan server load")
 		}
-		loads[name] = load
+		// Estimate load: rooms * average occupancy
+		loads[name] = roomCount * m.avgRoomOccupancy
 	}
 
 	if err := rows.Err(); err != nil {
@@ -155,6 +156,7 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 
 // selectLeastLoadedServer picks the server with the lowest load
 // If preferredServers is provided, it will try to select from those first
+// Respects maxServerCapacity limit
 func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]int, preferredServers []string) string {
 	var selectedServer string
 	minLoad := -1
@@ -175,6 +177,11 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 			}
 
 			load := loads[server]
+			// Check if server has capacity for one more room
+			if load+m.avgRoomOccupancy > m.maxServerCapacity {
+				continue
+			}
+			
 			if minLoad == -1 || load < minLoad {
 				minLoad = load
 				selectedServer = server
@@ -187,13 +194,30 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 		}
 	}
 
-	// No preferred servers or all are unavailable - select from all available
+	// No preferred servers or all are at capacity - select from all available
 	minLoad = -1
 	for _, server := range m.availableServers {
 		load := loads[server]
+		// Check if server has capacity for one more room
+		if load+m.avgRoomOccupancy > m.maxServerCapacity {
+			continue
+		}
+		
 		if minLoad == -1 || load < minLoad {
 			minLoad = load
 			selectedServer = server
+		}
+	}
+
+	// If all servers are at capacity, select least loaded anyway (fallback)
+	if selectedServer == "" {
+		minLoad = -1
+		for _, server := range m.availableServers {
+			load := loads[server]
+			if minLoad == -1 || load < minLoad {
+				minLoad = load
+				selectedServer = server
+			}
 		}
 	}
 

@@ -164,10 +164,11 @@ CREATE TABLE room_server_assignments (
    - `last_used_at` is updated
 
 3. **New assignment:**
-   - Load is calculated for each server (number of active sessions)
-   - Server with minimum load is selected
+   - Load is calculated for each server: `rooms_count × AVG_ROOM_OCCUPANCY`
+   - Server with minimum load is selected (respecting MAX_SERVER_CAPACITY limit)
    - Record is created in `room_server_assignments`
    - Selected server name is returned
+   - If all servers are at capacity, selects least loaded anyway (fallback)
 
 4. **Auto-cleanup:**
    - Periodically (on session cleanup timer) assignments are removed for rooms without active users

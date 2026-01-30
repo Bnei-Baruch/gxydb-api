@@ -113,10 +113,11 @@ INFO: Cleaned inactive room server assignments cleaned_assignments=5
 
 ### Metrics to Monitor
 
-- Server load distribution (COUNT distinct users per gateway)
+- Server load distribution (COUNT rooms per gateway × AVG_ROOM_OCCUPANCY)
 - Assignment creation rate
 - Assignment cleanup rate
 - Regional match rate (if using SERVER_REGIONS)
+- Rooms per server (should not exceed MAX_SERVER_CAPACITY / AVG_ROOM_OCCUPANCY)
 
 ## Troubleshooting
 
