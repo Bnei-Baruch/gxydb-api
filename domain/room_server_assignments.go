@@ -79,7 +79,8 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 		return "", pkgerr.Wrap(err, "get server loads")
 	}
 
-	selectedServer := m.selectLeastLoadedServer(serverLoads, preferredServers)
+	reservedServers := m.getReservedServers(countryCode)
+	selectedServer := m.selectLeastLoadedServer(serverLoads, preferredServers, reservedServers)
 
 	// Create assignment with region info
 	_, err = queries.Raw(
@@ -112,6 +113,22 @@ func (m *RoomServerAssignmentManager) getPreferredServers(countryCode string) []
 	}
 	
 	return nil
+}
+
+// getReservedServers returns list of servers reserved for OTHER regions
+func (m *RoomServerAssignmentManager) getReservedServers(countryCode string) map[string]bool {
+	reserved := make(map[string]bool)
+	
+	for region, servers := range m.serverRegions {
+		if region == countryCode {
+			continue // Skip own region
+		}
+		for _, server := range servers {
+			reserved[server] = true
+		}
+	}
+	
+	return reserved
 }
 
 // getServerLoads calculates estimated load for each available server
@@ -157,7 +174,8 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 // selectLeastLoadedServer picks the server to fill sequentially
 // Strategy: fill servers one by one to maxServerCapacity, then move to next
 // If preferredServers is provided, it will try to select from those first
-func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]int, preferredServers []string) string {
+// reservedServers are excluded from selection (unless all non-reserved are at capacity)
+func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]int, preferredServers []string, reservedServers map[string]bool) string {
 	var selectedServer string
 	maxLoad := -1
 
@@ -195,9 +213,14 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 		}
 	}
 
-	// No preferred servers or all are at capacity - select from all available
+	// No preferred servers or all are at capacity - select from non-reserved servers
 	maxLoad = -1
 	for _, server := range m.availableServers {
+		// Skip servers reserved for other regions
+		if reservedServers[server] {
+			continue
+		}
+		
 		load := loads[server]
 		// Check if server has capacity for one more room
 		if load+m.avgRoomOccupancy > m.maxServerCapacity {
@@ -210,8 +233,39 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 			selectedServer = server
 		}
 	}
+	
+	// If we found a non-reserved server, use it
+	if selectedServer != "" {
+		return selectedServer
+	}
 
-	// If all servers are at capacity, select least loaded anyway (fallback)
+	// All non-reserved servers are at capacity - try reserved servers as fallback
+	maxLoad = -1
+	for _, server := range m.availableServers {
+		// Only consider reserved servers now
+		if !reservedServers[server] {
+			continue
+		}
+		
+		load := loads[server]
+		// Check if server has capacity for one more room
+		if load+m.avgRoomOccupancy > m.maxServerCapacity {
+			continue
+		}
+		
+		// Select server with MAXIMUM load (to fill it first)
+		if maxLoad == -1 || load > maxLoad {
+			maxLoad = load
+			selectedServer = server
+		}
+	}
+	
+	// If we found a reserved server with capacity, use it
+	if selectedServer != "" {
+		return selectedServer
+	}
+
+	// If all servers are at capacity, select least loaded anyway (final fallback)
 	if selectedServer == "" {
 		minLoad := -1
 		for _, server := range m.availableServers {
