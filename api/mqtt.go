@@ -17,15 +17,26 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/domain"
+	"github.com/Bnei-Baruch/gxydb-api/instrumentation"
 )
 
 // GatewayStatus holds the status of a Janus gateway
 type GatewayStatus struct {
-	Name     string
-	Online   bool
-	Sessions int
-	LastSeen time.Time
-	mu       sync.RWMutex
+	Name           string
+	Online         bool
+	Sessions       int
+	LastSeen       time.Time
+	OfflineAt      time.Time      // When server went offline
+	OfflineTimer   *time.Timer    // Timer for failover trigger
+	mu             sync.RWMutex
+}
+
+// FailoverMapping tracks which failover server is serving which failed primary
+type FailoverMapping struct {
+	FailedServer   string    // Primary server that failed (e.g., "gxy1")
+	FailoverServer string    // Failover server replacing it (e.g., "gxy12")
+	FailedAt       time.Time // When failover happened
 }
 
 type MQTTListener struct {
@@ -37,15 +48,29 @@ type MQTTListener struct {
 	gatewayStatusesMu      sync.RWMutex
 	periodicTicker         *time.Ticker
 	adminSecret            string
+	
+	// Failover state
+	failoverMappings      map[string]*FailoverMapping // failed server -> mapping
+	failoverMappingsMu    sync.RWMutex
+	availableFailovers    []string                    // List of available failover servers
+	availableFailoversMu  sync.RWMutex
+	roomServerAssignmentMgr *domain.RoomServerAssignmentManager
 }
 
-func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionManager, adminSecret string) *MQTTListener {
+func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionManager, adminSecret string, roomServerAssignmentMgr *domain.RoomServerAssignmentManager) *MQTTListener {
+	// Initialize available failover servers from config
+	availableFailovers := make([]string, len(common.Config.FailoverJanusServers))
+	copy(availableFailovers, common.Config.FailoverJanusServers)
+	
 	return &MQTTListener{
-		cache:                  cache,
-		serviceProtocolHandler: sph,
-		SessionManager:         sm,
-		gatewayStatuses:        make(map[string]*GatewayStatus),
-		adminSecret:            adminSecret,
+		cache:                   cache,
+		serviceProtocolHandler:  sph,
+		SessionManager:          sm,
+		gatewayStatuses:         make(map[string]*GatewayStatus),
+		adminSecret:             adminSecret,
+		failoverMappings:        make(map[string]*FailoverMapping),
+		availableFailovers:      availableFailovers,
+		roomServerAssignmentMgr: roomServerAssignmentMgr,
 	}
 }
 
@@ -280,8 +305,74 @@ func (l *MQTTListener) HandleGatewayStatus(c mqtt.Client, m mqtt.Message) {
 		l.gatewayStatusesMu.Unlock()
 
 		status.mu.Lock()
+		wasOnline := status.Online
 		status.Online = statusMsg.Online
 		status.LastSeen = time.Now()
+		
+		// Handle offline transition
+		if wasOnline && !statusMsg.Online {
+			// Server went offline - cancel existing timer if any
+			if status.OfflineTimer != nil {
+				status.OfflineTimer.Stop()
+			}
+			
+			status.OfflineAt = time.Now()
+			
+			// Check if this is a primary server (not failover)
+			isPrimary := false
+			for _, primary := range common.Config.AvailableJanusServers {
+				if primary == serverName {
+					isPrimary = true
+					break
+				}
+			}
+			
+			if isPrimary {
+				// Start failover timer
+				status.OfflineTimer = time.AfterFunc(common.Config.FailoverWaitTime, func() {
+					l.triggerFailover(context.Background(), serverName)
+				})
+				
+				log.Warn().
+					Str("server", serverName).
+					Dur("wait_time", common.Config.FailoverWaitTime).
+					Msg("Primary server offline - failover timer started")
+			}
+		}
+		
+		// Handle online transition (recovery)
+		if !wasOnline && statusMsg.Online {
+			// Server came back online - cancel timer
+			if status.OfflineTimer != nil {
+				status.OfflineTimer.Stop()
+				status.OfflineTimer = nil
+			}
+			
+			// Check if this server was failed over
+			l.failoverMappingsMu.RLock()
+			mapping, wasFailed := l.failoverMappings[serverName]
+			l.failoverMappingsMu.RUnlock()
+			
+			if wasFailed {
+				log.Info().
+					Str("server", serverName).
+					Str("failover_server", mapping.FailoverServer).
+					Msg("Failed server recovered - new assignments will go to recovered server")
+				
+				// Update metrics
+				instrumentation.Stats.FailoverEventsCounter.WithLabelValues("recovered", serverName, mapping.FailoverServer).Inc()
+				instrumentation.Stats.FailoverActiveGauge.WithLabelValues(serverName, mapping.FailoverServer).Set(0)
+				
+				// Release failover back to pool
+				l.releaseFailover(mapping.FailoverServer)
+				
+				// Remove mapping
+				l.failoverMappingsMu.Lock()
+				delete(l.failoverMappings, serverName)
+				l.failoverMappingsMu.Unlock()
+			}
+		}
+		
 		status.mu.Unlock()
 
 		log.Info().
@@ -335,6 +426,173 @@ func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message)
 			}
 		}
 	}()
+}
+
+// getAvailableFailover returns next available failover server, or empty string if none available
+func (l *MQTTListener) getAvailableFailover() string {
+	l.availableFailoversMu.Lock()
+	defer l.availableFailoversMu.Unlock()
+	
+	if len(l.availableFailovers) == 0 {
+		return ""
+	}
+	
+	// Take first available
+	failover := l.availableFailovers[0]
+	l.availableFailovers = l.availableFailovers[1:]
+	return failover
+}
+
+// releaseFailover returns failover server back to available pool
+func (l *MQTTListener) releaseFailover(serverName string) {
+	l.availableFailoversMu.Lock()
+	defer l.availableFailoversMu.Unlock()
+	
+	l.availableFailovers = append(l.availableFailovers, serverName)
+}
+
+// migrateAssignments moves all room assignments from failed server to target server
+func (l *MQTTListener) migrateAssignments(ctx context.Context, fromServer, toServer string) error {
+	if l.roomServerAssignmentMgr == nil {
+		return pkgerr.New("room server assignment manager not available")
+	}
+	
+	count, err := l.roomServerAssignmentMgr.MigrateServerAssignments(ctx, fromServer, toServer)
+	if err != nil {
+		return pkgerr.Wrap(err, "migrate assignments")
+	}
+	
+	log.Info().
+		Str("from_server", fromServer).
+		Str("to_server", toServer).
+		Int("count", count).
+		Msg("Migrated room assignments")
+	
+	return nil
+}
+
+// triggerFailover initiates failover process for a failed server
+func (l *MQTTListener) triggerFailover(ctx context.Context, failedServer string) {
+	log.Warn().
+		Str("server", failedServer).
+		Dur("wait_time", common.Config.FailoverWaitTime).
+		Msg("Server offline - failover triggered")
+	
+	// Increment triggered event metric
+	instrumentation.Stats.FailoverEventsCounter.WithLabelValues("triggered", failedServer, "").Inc()
+	
+	// Check if already failed over
+	l.failoverMappingsMu.RLock()
+	_, alreadyFailed := l.failoverMappings[failedServer]
+	l.failoverMappingsMu.RUnlock()
+	
+	if alreadyFailed {
+		log.Debug().Str("server", failedServer).Msg("Already failed over, skipping")
+		return
+	}
+	
+	// Try to get failover server
+	failoverServer := l.getAvailableFailover()
+	
+	if failoverServer == "" {
+		// No failover available - distribute to alive primary servers
+		log.Error().
+			Str("server", failedServer).
+			Msg("No failover servers available - will distribute to alive primary servers")
+		
+		instrumentation.Stats.FailoverEventsCounter.WithLabelValues("no_failover", failedServer, "").Inc()
+		
+		// Find alive primary servers
+		aliveServers := l.getAlivePrimaryServers()
+		if len(aliveServers) == 0 {
+			log.Error().Msg("No alive primary servers available - cannot failover")
+			instrumentation.Stats.FailoverEventsCounter.WithLabelValues("failed", failedServer, "").Inc()
+			return
+		}
+		
+		// Distribute assignments to alive servers
+		if err := l.distributeAssignments(ctx, failedServer, aliveServers); err != nil {
+			log.Error().Err(err).Str("server", failedServer).Msg("Failed to distribute assignments")
+			instrumentation.Stats.FailoverEventsCounter.WithLabelValues("failed", failedServer, "").Inc()
+		} else {
+			instrumentation.Stats.FailoverEventsCounter.WithLabelValues("distributed", failedServer, "").Inc()
+		}
+		return
+	}
+	
+	// Migrate assignments to failover
+	if err := l.migrateAssignments(ctx, failedServer, failoverServer); err != nil {
+		log.Error().
+			Err(err).
+			Str("failed_server", failedServer).
+			Str("failover_server", failoverServer).
+			Msg("Failed to migrate assignments to failover")
+		
+		instrumentation.Stats.FailoverEventsCounter.WithLabelValues("failed", failedServer, failoverServer).Inc()
+		
+		// Release failover back to pool
+		l.releaseFailover(failoverServer)
+		return
+	}
+	
+	// Record failover mapping
+	l.failoverMappingsMu.Lock()
+	l.failoverMappings[failedServer] = &FailoverMapping{
+		FailedServer:   failedServer,
+		FailoverServer: failoverServer,
+		FailedAt:       time.Now(),
+	}
+	l.failoverMappingsMu.Unlock()
+	
+	// Update metrics
+	instrumentation.Stats.FailoverEventsCounter.WithLabelValues("completed", failedServer, failoverServer).Inc()
+	instrumentation.Stats.FailoverActiveGauge.WithLabelValues(failedServer, failoverServer).Set(1)
+	
+	log.Info().
+		Str("failed_server", failedServer).
+		Str("failover_server", failoverServer).
+		Msg("Failover completed successfully")
+}
+
+// getAlivePrimaryServers returns list of alive primary servers
+func (l *MQTTListener) getAlivePrimaryServers() []string {
+	l.gatewayStatusesMu.RLock()
+	defer l.gatewayStatusesMu.RUnlock()
+	
+	var alive []string
+	for _, serverName := range common.Config.AvailableJanusServers {
+		if status, ok := l.gatewayStatuses[serverName]; ok {
+			status.mu.RLock()
+			online := status.Online
+			status.mu.RUnlock()
+			
+			if online {
+				alive = append(alive, serverName)
+			}
+		}
+	}
+	
+	return alive
+}
+
+// distributeAssignments distributes room assignments from failed server among alive servers
+func (l *MQTTListener) distributeAssignments(ctx context.Context, failedServer string, aliveServers []string) error {
+	if l.roomServerAssignmentMgr == nil {
+		return pkgerr.New("room server assignment manager not available")
+	}
+	
+	count, err := l.roomServerAssignmentMgr.DistributeServerAssignments(ctx, failedServer, aliveServers)
+	if err != nil {
+		return pkgerr.Wrap(err, "distribute assignments")
+	}
+	
+	log.Warn().
+		Str("failed_server", failedServer).
+		Strs("alive_servers", aliveServers).
+		Int("count", count).
+		Msg("Distributed assignments to alive servers (emergency mode)")
+	
+	return nil
 }
 
 // GetGatewayStatuses returns a copy of all gateway statuses (thread-safe)

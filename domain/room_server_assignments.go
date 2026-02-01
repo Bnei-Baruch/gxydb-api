@@ -309,3 +309,88 @@ func (m *RoomServerAssignmentManager) CleanInactiveAssignments(ctx context.Conte
 
 	return nil
 }
+
+// MigrateServerAssignments moves all room assignments from one server to another
+// Used for failover - migrates all rooms from failed server to failover server
+func (m *RoomServerAssignmentManager) MigrateServerAssignments(ctx context.Context, fromServer, toServer string) (int, error) {
+	res, err := queries.Raw(`
+		UPDATE room_server_assignments
+		SET gateway_name = $1, last_used_at = $2
+		WHERE gateway_name = $3
+	`, toServer, time.Now().UTC(), fromServer).Exec(m.db)
+	
+	if err != nil {
+		return 0, pkgerr.Wrap(err, "migrate server assignments")
+	}
+	
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return 0, pkgerr.Wrap(err, "get rows affected")
+	}
+	
+	log.Ctx(ctx).Info().
+		Str("from_server", fromServer).
+		Str("to_server", toServer).
+		Int64("count", rowsAffected).
+		Msg("Migrated room server assignments")
+	
+	return int(rowsAffected), nil
+}
+
+// DistributeServerAssignments distributes room assignments from failed server among alive servers
+// Used when failover servers are exhausted - distributes to alive primary servers
+func (m *RoomServerAssignmentManager) DistributeServerAssignments(ctx context.Context, failedServer string, aliveServers []string) (int, error) {
+	if len(aliveServers) == 0 {
+		return 0, pkgerr.New("no alive servers provided")
+	}
+	
+	// Get all assignments for failed server
+	type Assignment struct {
+		RoomID int64 `boil:"room_id"`
+	}
+	
+	var assignments []Assignment
+	err := queries.Raw(`
+		SELECT room_id
+		FROM room_server_assignments
+		WHERE gateway_name = $1
+		ORDER BY room_id
+	`, failedServer).Bind(ctx, m.db, &assignments)
+	
+	if err != nil {
+		return 0, pkgerr.Wrap(err, "get assignments")
+	}
+	
+	if len(assignments) == 0 {
+		return 0, nil
+	}
+	
+	// Distribute assignments round-robin among alive servers
+	now := time.Now().UTC()
+	for i, assignment := range assignments {
+		targetServer := aliveServers[i%len(aliveServers)]
+		
+		_, err := queries.Raw(`
+			UPDATE room_server_assignments
+			SET gateway_name = $1, last_used_at = $2
+			WHERE room_id = $3
+		`, targetServer, now, assignment.RoomID).Exec(m.db)
+		
+		if err != nil {
+			log.Ctx(ctx).Error().
+				Err(err).
+				Int64("room_id", assignment.RoomID).
+				Str("target_server", targetServer).
+				Msg("Failed to distribute assignment")
+			continue
+		}
+	}
+	
+	log.Ctx(ctx).Warn().
+		Str("failed_server", failedServer).
+		Strs("alive_servers", aliveServers).
+		Int("count", len(assignments)).
+		Msg("Distributed room server assignments (emergency mode)")
+	
+	return len(assignments), nil
+}

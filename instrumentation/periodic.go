@@ -89,11 +89,15 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 	if pc.gatewayStatusProvider != nil {
 		statuses := pc.gatewayStatusProvider.GetGatewayStatuses()
 
-		// Use AVAILABLE_JANUS_SERVERS from config
-		for _, serverName := range common.Config.AvailableJanusServers {
+		// Monitor both AVAILABLE and FAILOVER servers
+		allServers := make([]string, 0, len(common.Config.AvailableJanusServers)+len(common.Config.FailoverJanusServers))
+		allServers = append(allServers, common.Config.AvailableJanusServers...)
+		allServers = append(allServers, common.Config.FailoverJanusServers...)
+		
+		for _, serverName := range allServers {
 			if status, ok := statuses[serverName]; ok {
 				// Use data from MQTT
-				// Default to "rooms" type for all servers in AVAILABLE_JANUS_SERVERS
+				// Default to "rooms" type for all servers
 				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeRooms).Set(float64(status.Sessions))
 
 				// Log if gateway is offline or stale
@@ -129,8 +133,12 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 
 	c := make(chan *gatewayCallRes)
 
-	// Use AVAILABLE_JANUS_SERVERS from config
-	for _, serverName := range common.Config.AvailableJanusServers {
+	// Use AVAILABLE + FAILOVER servers from config
+	allServers := make([]string, 0, len(common.Config.AvailableJanusServers)+len(common.Config.FailoverJanusServers))
+	allServers = append(allServers, common.Config.AvailableJanusServers...)
+	allServers = append(allServers, common.Config.FailoverJanusServers...)
+	
+	for _, serverName := range allServers {
 		go func(name string, c chan *gatewayCallRes) {
 			res := &gatewayCallRes{serverName: name}
 			start := time.Now()
@@ -150,7 +158,7 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 	}
 
 	timeout := time.After(900 * time.Millisecond)
-	for i := range common.Config.AvailableJanusServers {
+	for i := range allServers {
 		select {
 		case res := <-c:
 			if res.err != nil {
@@ -162,7 +170,7 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 			}
 			Stats.GatewaySessionsGauge.WithLabelValues(res.serverName, common.GatewayTypeRooms).Set(float64(res.sessions))
 		case <-timeout:
-			log.Error().Msgf("PeriodicCollector.collectGatewaySessions timeout (i, len)=(%d,%d)", i, len(common.Config.AvailableJanusServers))
+			log.Error().Msgf("PeriodicCollector.collectGatewaySessions timeout (i, len)=(%d,%d)", i, len(allServers))
 			break
 		}
 	}
