@@ -48,11 +48,11 @@ func NewRoomServerAssignmentManager(db common.DBInterface, servers []string, max
 // countryCode is used for regional routing (only for first assignment)
 func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roomID int64, countryCode string) (string, error) {
 	// First, check if there's already an assignment
-	var gatewayName string
+	var existingGatewayName string
 	err := queries.Raw(
 		"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
 		roomID,
-	).QueryRow(m.db).Scan(&gatewayName)
+	).QueryRow(m.db).Scan(&existingGatewayName)
 
 	if err == nil {
 		// Assignment exists, update last_used_at (sticky routing - ignore countryCode)
@@ -63,7 +63,7 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 		if err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to update last_used_at")
 		}
-		return gatewayName, nil
+		return existingGatewayName, nil
 	}
 
 	if err != sql.ErrNoRows {
@@ -83,23 +83,38 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 	selectedServer := m.selectLeastLoadedServer(serverLoads, preferredServers, reservedServers)
 
 	// Create assignment with region info
-	_, err = queries.Raw(
-		"INSERT INTO room_server_assignments (room_id, gateway_name, region, assigned_at, last_used_at) VALUES ($1, $2, $3, $4, $5)",
-		roomID, selectedServer, countryCode, time.Now().UTC(), time.Now().UTC(),
-	).Exec(m.db)
+	// Use INSERT ... ON CONFLICT to handle race conditions atomically
+	var gatewayName string
+	err = queries.Raw(`
+		INSERT INTO room_server_assignments (room_id, gateway_name, region, assigned_at, last_used_at) 
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (room_id) 
+		DO UPDATE SET last_used_at = EXCLUDED.last_used_at
+		RETURNING gateway_name
+	`, roomID, selectedServer, countryCode, time.Now().UTC(), time.Now().UTC()).QueryRow(m.db).Scan(&gatewayName)
 
 	if err != nil {
 		return "", pkgerr.Wrap(err, "insert room assignment")
 	}
+	
+	// If gateway_name differs from selectedServer, it means another request won the race
+	// Log this for debugging
+	if gatewayName != selectedServer {
+		log.Ctx(ctx).Debug().
+			Int64("room_id", roomID).
+			Str("selected_server", selectedServer).
+			Str("actual_server", gatewayName).
+			Msg("Race condition detected - using existing assignment")
+	}
 
 	log.Ctx(ctx).Info().
 		Int64("room_id", roomID).
-		Str("gateway_name", selectedServer).
+		Str("gateway_name", gatewayName).
 		Str("country_code", countryCode).
 		Bool("regional_match", len(preferredServers) > 0).
 		Msg("Assigned room to server")
 
-	return selectedServer, nil
+	return gatewayName, nil
 }
 
 // getPreferredServers returns list of servers for the given country code
