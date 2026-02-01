@@ -39,6 +39,7 @@ type config struct {
 	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
 	FailoverJanusServers  []string
 	FailoverWaitTime      time.Duration
+	StrJanusServers       []string            // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
 }
 
 func newConfig() *config {
@@ -72,6 +73,7 @@ func newConfig() *config {
 		ScaleMode:             false, // default: use room's default gateway (legacy mode)
 		FailoverJanusServers:  []string{},
 		FailoverWaitTime:      5 * time.Second,
+		StrJanusServers:       []string{},
 	}
 }
 
@@ -219,6 +221,12 @@ func Init() {
 			panic(err)
 		}
 		Config.FailoverWaitTime = pVal
+	}
+	if val := os.Getenv("STR_JANUS_SERVERS"); val != "" {
+		Config.StrJanusServers = strings.Split(val, ",")
+		for i := range Config.StrJanusServers {
+			Config.StrJanusServers[i] = strings.TrimSpace(Config.StrJanusServers[i])
+		}
 	}
 	if val := os.Getenv("SCALE"); val != "" {
 		Config.ScaleMode = val == "true"

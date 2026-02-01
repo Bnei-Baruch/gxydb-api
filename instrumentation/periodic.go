@@ -89,15 +89,14 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 	if pc.gatewayStatusProvider != nil {
 		statuses := pc.gatewayStatusProvider.GetGatewayStatuses()
 
-		// Monitor both AVAILABLE and FAILOVER servers
-		allServers := make([]string, 0, len(common.Config.AvailableJanusServers)+len(common.Config.FailoverJanusServers))
-		allServers = append(allServers, common.Config.AvailableJanusServers...)
-		allServers = append(allServers, common.Config.FailoverJanusServers...)
+		// Monitor AVAILABLE and FAILOVER servers (rooms type)
+		allRoomsServers := make([]string, 0, len(common.Config.AvailableJanusServers)+len(common.Config.FailoverJanusServers))
+		allRoomsServers = append(allRoomsServers, common.Config.AvailableJanusServers...)
+		allRoomsServers = append(allRoomsServers, common.Config.FailoverJanusServers...)
 		
-		for _, serverName := range allServers {
+		for _, serverName := range allRoomsServers {
 			if status, ok := statuses[serverName]; ok {
-				// Use data from MQTT
-				// Default to "rooms" type for all servers
+				// Use data from MQTT - rooms type
 				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeRooms).Set(float64(status.Sessions))
 
 				// Log if gateway is offline or stale
@@ -115,6 +114,35 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeRooms).Set(0)
 				log.Debug().
 					Str("gateway", serverName).
+					Msg("Gateway not found in MQTT statuses")
+			}
+		}
+		
+		// Monitor streaming servers (streaming type)
+		// FIXME: This is temporary monitoring for streaming servers.
+		//        These servers should be monitored by strdb service instead.
+		//        Move this monitoring logic to strdb and remove from gxydb-api.
+		for _, serverName := range common.Config.StrJanusServers {
+			if status, ok := statuses[serverName]; ok {
+				// Use data from MQTT - streaming type
+				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeStreaming).Set(float64(status.Sessions))
+
+				// Log if gateway is offline or stale
+				if !status.Online {
+					log.Debug().Str("gateway", serverName).Str("type", "streaming").Msg("Gateway is offline")
+				} else if time.Since(status.LastSeen) > 60*time.Second {
+					log.Warn().
+						Str("gateway", serverName).
+						Str("type", "streaming").
+						Dur("since_last_seen", time.Since(status.LastSeen)).
+						Msg("Gateway status is stale")
+				}
+			} else {
+				// Gateway not found in MQTT statuses - set to 0
+				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeStreaming).Set(0)
+				log.Debug().
+					Str("gateway", serverName).
+					Str("type", "streaming").
 					Msg("Gateway not found in MQTT statuses")
 			}
 		}
