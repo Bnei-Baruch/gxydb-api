@@ -265,14 +265,14 @@ func (a *App) initRoomServerAssignments() {
 func (a *App) initInstrumentation() {
 	instrumentation.Stats.Init()
 	if common.Config.CollectPeriodicStats {
-		a.periodicStatsCollector = instrumentation.NewPeriodicCollector(a.DB)
+		a.periodicStatsCollector = instrumentation.NewPeriodicCollector(a.DB, a.mqttListener)
 		a.periodicStatsCollector.Start()
 	}
 }
 
 func (a *App) initMQTT() {
 	if common.Config.MQTTBrokerUrl != "" {
-		a.mqttListener = NewMQTTListener(a.cache, a.serviceProtocolHandler, a.sessionManager)
+		a.mqttListener = NewMQTTListener(a.cache, a.serviceProtocolHandler, a.sessionManager, common.Config.GatewayPluginAdminKey)
 		if err := a.mqttListener.Start(); err != nil {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
 		}
