@@ -239,41 +239,19 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 		return selectedServer
 	}
 
-	// All non-reserved servers are at capacity - try reserved servers as fallback
-	maxLoad = -1
+	// All non-reserved servers are at capacity
+	// Final fallback: select least loaded non-reserved server (ignoring capacity check)
+	minLoad := -1
 	for _, server := range m.availableServers {
-		// Only consider reserved servers now
-		if !reservedServers[server] {
+		// Still skip servers reserved for other regions
+		if reservedServers[server] {
 			continue
 		}
 		
 		load := loads[server]
-		// Check if server has capacity for one more room
-		if load+m.avgRoomOccupancy > m.maxServerCapacity {
-			continue
-		}
-		
-		// Select server with MAXIMUM load (to fill it first)
-		if maxLoad == -1 || load > maxLoad {
-			maxLoad = load
+		if minLoad == -1 || load < minLoad {
+			minLoad = load
 			selectedServer = server
-		}
-	}
-	
-	// If we found a reserved server with capacity, use it
-	if selectedServer != "" {
-		return selectedServer
-	}
-
-	// If all servers are at capacity, select least loaded anyway (final fallback)
-	if selectedServer == "" {
-		minLoad := -1
-		for _, server := range m.availableServers {
-			load := loads[server]
-			if minLoad == -1 || load < minLoad {
-				minLoad = load
-				selectedServer = server
-			}
 		}
 	}
 
