@@ -103,7 +103,8 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 				// Log if gateway is offline or stale
 				if !status.Online {
 					log.Debug().Str("gateway", serverName).Msg("Gateway is offline")
-				} else if time.Since(status.LastSeen) > 30*time.Second {
+				} else if time.Since(status.LastSeen) > 60*time.Second {
+					// Only warn if REALLY stale (>1 minute)
 					log.Warn().
 						Str("gateway", serverName).
 						Dur("since_last_seen", time.Since(status.LastSeen)).

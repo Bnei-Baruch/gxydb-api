@@ -221,24 +221,41 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 
 // startPeriodicAdminMessages sends list_sessions requests to online gateways every 10 seconds
 func (l *MQTTListener) startPeriodicAdminMessages() {
+	// Send immediately on start
+	l.sendAdminMessagesToOnlineGateways()
+	
+	// Then send every 10 seconds
 	l.periodicTicker = time.NewTicker(10 * time.Second)
 	defer l.periodicTicker.Stop()
 
 	for range l.periodicTicker.C {
-		l.gatewayStatusesMu.RLock()
-		for _, status := range l.gatewayStatuses {
-			status.mu.RLock()
-			online := status.Online
-			name := status.Name
-			status.mu.RUnlock()
-
-			if online {
-				topic := fmt.Sprintf("janus/%s/to-janus-admin", name)
-				l.SendAdminMessage(topic)
-			}
-		}
-		l.gatewayStatusesMu.RUnlock()
+		l.sendAdminMessagesToOnlineGateways()
 	}
+}
+
+// sendAdminMessagesToOnlineGateways sends list_sessions to all online gateways
+func (l *MQTTListener) sendAdminMessagesToOnlineGateways() {
+	l.gatewayStatusesMu.RLock()
+	defer l.gatewayStatusesMu.RUnlock()
+	
+	onlineCount := 0
+	for _, status := range l.gatewayStatuses {
+		status.mu.RLock()
+		online := status.Online
+		name := status.Name
+		status.mu.RUnlock()
+
+		if online {
+			onlineCount++
+			topic := fmt.Sprintf("janus/%s/to-janus-admin", name)
+			l.SendAdminMessage(topic)
+		}
+	}
+	
+	log.Info().
+		Int("online_gateways", onlineCount).
+		Int("total_gateways", len(l.gatewayStatuses)).
+		Msg("Sent list_sessions requests to online gateways")
 }
 
 // SendAdminMessage sends a list_sessions request to a Janus gateway
@@ -251,11 +268,9 @@ func (l *MQTTListener) SendAdminMessage(topic string) {
 
 	jsonMessage, err := json.Marshal(message)
 	if err != nil {
-		log.Error().Err(err).Msg("SendAdminMessage: failed to marshal message")
+		log.Error().Err(err).Str("topic", topic).Msg("SendAdminMessage: failed to marshal message")
 		return
 	}
-
-	log.Debug().Str("topic", topic).Bytes("message", jsonMessage).Msg("SendAdminMessage")
 
 	if token := l.client.Publish(topic, byte(1), false, jsonMessage); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Str("topic", topic).Msg("SendAdminMessage: failed to publish")
