@@ -62,11 +62,40 @@ func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionMana
 	availableFailovers := make([]string, len(common.Config.FailoverJanusServers))
 	copy(availableFailovers, common.Config.FailoverJanusServers)
 	
+	// Pre-initialize gateway statuses for all configured servers
+	// This ensures we send admin requests even if status messages haven't arrived yet
+	gatewayStatuses := make(map[string]*GatewayStatus)
+	
+	// Initialize room servers
+	for _, name := range common.Config.AvailableJanusServers {
+		gatewayStatuses[name] = &GatewayStatus{
+			Name:   name,
+			Online: false, // Will be updated when status message arrives
+		}
+	}
+	
+	// Initialize failover servers
+	for _, name := range common.Config.FailoverJanusServers {
+		gatewayStatuses[name] = &GatewayStatus{
+			Name:   name,
+			Online: false,
+		}
+	}
+	
+	// Initialize streaming servers
+	// FIXME: Streaming servers should be monitored by strdb, not gxydb-api
+	for _, name := range common.Config.StrJanusServers {
+		gatewayStatuses[name] = &GatewayStatus{
+			Name:   name,
+			Online: false,
+		}
+	}
+	
 	return &MQTTListener{
 		cache:                   cache,
 		serviceProtocolHandler:  sph,
 		SessionManager:          sm,
-		gatewayStatuses:         make(map[string]*GatewayStatus),
+		gatewayStatuses:         gatewayStatuses,
 		adminSecret:             adminSecret,
 		failoverMappings:        make(map[string]*FailoverMapping),
 		availableFailovers:      availableFailovers,
@@ -233,29 +262,35 @@ func (l *MQTTListener) startPeriodicAdminMessages() {
 	}
 }
 
-// sendAdminMessagesToOnlineGateways sends list_sessions to all online gateways
+// sendAdminMessagesToOnlineGateways sends list_sessions to all gateways
 func (l *MQTTListener) sendAdminMessagesToOnlineGateways() {
 	l.gatewayStatusesMu.RLock()
 	defer l.gatewayStatusesMu.RUnlock()
 	
 	onlineCount := 0
+	totalSent := 0
 	for _, status := range l.gatewayStatuses {
 		status.mu.RLock()
 		online := status.Online
 		name := status.Name
 		status.mu.RUnlock()
 
+		// Send admin request to all gateways, regardless of online status
+		// This ensures we get session counts even if status messages are not published
+		topic := fmt.Sprintf("janus/%s/to-janus-admin", name)
+		l.SendAdminMessage(topic)
+		totalSent++
+		
 		if online {
 			onlineCount++
-			topic := fmt.Sprintf("janus/%s/to-janus-admin", name)
-			l.SendAdminMessage(topic)
 		}
 	}
 	
-	log.Info().
+	log.Debug().
 		Int("online_gateways", onlineCount).
+		Int("requests_sent", totalSent).
 		Int("total_gateways", len(l.gatewayStatuses)).
-		Msg("Sent list_sessions requests to online gateways")
+		Msg("Sent list_sessions requests to all gateways")
 }
 
 // SendAdminMessage sends a list_sessions request to a Janus gateway
