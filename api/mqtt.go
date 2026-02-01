@@ -417,6 +417,7 @@ func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message)
 			if exists {
 				status.mu.Lock()
 				status.Sessions = len(response.Sessions)
+				status.LastSeen = time.Now() // Update LastSeen on every admin response
 				status.mu.Unlock()
 
 				log.Debug().
