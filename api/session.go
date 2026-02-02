@@ -260,9 +260,9 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 
 	// Get room_id before closing session to check for assignment cleanup
-	var roomIDStr null.String
+	var roomID null.Int64
 	err = queries.Raw("SELECT room_id FROM sessions WHERE user_id = $1 AND removed_at IS NULL LIMIT 1", userID).
-		QueryRow(tx).Scan(&roomIDStr)
+		QueryRow(tx).Scan(&roomID)
 	if err != nil && err != sql.ErrNoRows {
 		log.Ctx(ctx).Error().Err(err).Msg("Failed to get room_id before closing session")
 	}
@@ -280,21 +280,8 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
 
-	// Check if this was the last session in the room and cleanup assignment immediately
-	if sm.roomServerAssignmentManager != nil && roomIDStr.Valid {
-		var activeCount int
-		err = queries.Raw("SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL", roomIDStr.String).
-			QueryRow(tx).Scan(&activeCount)
-		if err == nil && activeCount == 0 {
-			// No more active sessions in this room, cleanup assignment immediately
-			_, err = queries.Raw("DELETE FROM room_server_assignments WHERE room_id = $1", roomIDStr.String).Exec(tx)
-			if err != nil {
-				log.Ctx(ctx).Error().Err(err).Str("room_id", roomIDStr.String).Msg("Failed to cleanup room assignment")
-			} else {
-				log.Ctx(ctx).Info().Str("room_id", roomIDStr.String).Msg("Cleaned up room assignment immediately")
-			}
-		}
-	}
+	// Note: Room assignments cleanup is handled by PeriodicSessionCleaner.cleanRoomAssignments()
+	// This prevents race conditions during user reconnections.
 
 	return nil
 }
@@ -319,7 +306,7 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 
 	// Update last_used_at for room server assignment
 	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
-		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.String); err != nil {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.Int64); err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
 		}
 	}
@@ -345,9 +332,9 @@ func WrappingProtocolError(err error, msg string) *ProtocolError {
 }
 
 func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Session, error) {
-	_, ok := sm.cache.rooms.ByGatewayUID(user.Room)
+	room, ok := sm.cache.rooms.ByGatewayUID(user.Room)
 	if !ok {
-		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %s", user.Room))
+		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %d", user.Room))
 	}
 
 	gateway, ok := sm.cache.gateways.ByName(user.Janus)
@@ -357,11 +344,11 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 
 	s := models.Session{
 		UserID:                userID,
-		RoomID:                null.StringFrom(user.Room), // Store Janus room ID (gateway_uid), not internal rooms.id
+		RoomID:                null.Int64From(room.ID),
 		GatewayID:             null.Int64From(gateway.ID),
 		GatewaySession:        null.Int64From(user.Session),
 		GatewayHandle:         null.Int64From(user.Handle),
-		GatewayFeed:           null.StringFrom(user.RFID),
+		GatewayFeed:           null.Int64From(user.RFID),
 		GatewayHandleTextroom: null.Int64From(user.TextroomHandle),
 		Display:               null.StringFrom(user.Display),
 		Camera:                user.Camera,

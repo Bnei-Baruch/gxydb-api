@@ -87,6 +87,20 @@ SCALE=false
 - [ ] Auto-cleanup: Assignments removed when room empty
 - [ ] Monitoring: Check logs for assignment events
 
+## Endpoints Behavior
+
+### GET /groups
+- **Always returns:** `default_gateway` from `rooms.default_gateway_id`
+- **Not affected by:** SCALE mode or dynamic assignments
+- **Use case:** Show static/factory room configurations
+
+### GET /rooms
+- **SCALE=false:** Returns `default_gateway` from `rooms.default_gateway_id`
+- **SCALE=true:** Returns `gateway_name` from `room_server_assignments` if exists, otherwise `default_gateway`
+- **Use case:** Show real-time room assignments for active rooms
+
+See `ENDPOINTS_DIFFERENCE.md` for detailed explanation.
+
 ## Monitoring
 
 ### Legacy Mode (SCALE=false)
@@ -113,10 +127,11 @@ INFO: Cleaned inactive room server assignments cleaned_assignments=5
 
 ### Metrics to Monitor
 
-- Server load distribution (COUNT distinct users per gateway)
+- Server load distribution (COUNT rooms per gateway × AVG_ROOM_OCCUPANCY)
 - Assignment creation rate
 - Assignment cleanup rate
 - Regional match rate (if using SERVER_REGIONS)
+- Rooms per server (should not exceed MAX_SERVER_CAPACITY / AVG_ROOM_OCCUPANCY)
 
 ## Troubleshooting
 

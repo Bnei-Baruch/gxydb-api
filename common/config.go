@@ -37,6 +37,9 @@ type config struct {
 	AvgRoomOccupancy      int
 	ServerRegions         map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
 	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
+	FailoverJanusServers  []string
+	FailoverWaitTime      time.Duration
+	StrJanusServers       []string            // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
 }
 
 func newConfig() *config {
@@ -68,6 +71,9 @@ func newConfig() *config {
 		AvgRoomOccupancy:      10,
 		ServerRegions:         make(map[string][]string),
 		ScaleMode:             false, // default: use room's default gateway (legacy mode)
+		FailoverJanusServers:  []string{},
+		FailoverWaitTime:      5 * time.Second,
+		StrJanusServers:       []string{},
 	}
 }
 
@@ -201,6 +207,25 @@ func Init() {
 				}
 				Config.ServerRegions[countryCode] = servers
 			}
+		}
+	}
+	if val := os.Getenv("FAILOVER_JANUS_SERVERS"); val != "" {
+		Config.FailoverJanusServers = strings.Split(val, ",")
+		for i := range Config.FailoverJanusServers {
+			Config.FailoverJanusServers[i] = strings.TrimSpace(Config.FailoverJanusServers[i])
+		}
+	}
+	if val := os.Getenv("FAILOVER_WAIT_TIME"); val != "" {
+		pVal, err := time.ParseDuration(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.FailoverWaitTime = pVal
+	}
+	if val := os.Getenv("STR_JANUS_SERVERS"); val != "" {
+		Config.StrJanusServers = strings.Split(val, ",")
+		for i := range Config.StrJanusServers {
+			Config.StrJanusServers[i] = strings.TrimSpace(Config.StrJanusServers[i])
 		}
 	}
 	if val := os.Getenv("SCALE"); val != "" {

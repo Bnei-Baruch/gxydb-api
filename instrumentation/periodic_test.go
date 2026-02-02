@@ -43,7 +43,7 @@ func (s *PeriodicCollectorTestSuite) TestCollectRoomParticipants() {
 		}
 	}
 
-	pc := NewPeriodicCollector(s.DB)
+	pc := NewPeriodicCollector(s.DB, nil) // nil = MQTT disabled in tests
 	pc.collectRoomParticipants()
 
 	for i := range rooms {

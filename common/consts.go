@@ -1,5 +1,7 @@
 package common
 
+import "time"
+
 const GatewayTypeRooms = "rooms"
 const GatewayTypeStreaming = "streaming"
 
@@ -19,3 +21,12 @@ const APIDefaultPageSize = 50
 const APIMaxPageSize = 1000
 
 const DynamicConfigMQTTAuth = "mqtt_auth"
+
+// GatewayStatusInfo holds the status of a Janus gateway
+// Used for passing gateway status between packages (api <-> instrumentation)
+type GatewayStatusInfo struct {
+	Name     string
+	Online   bool
+	Sessions int
+	LastSeen time.Time
+}

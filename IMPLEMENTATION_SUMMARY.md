@@ -46,6 +46,8 @@
 4. `domain/room_server_assignments_test.go`
 5. `ROOM_SERVER_BALANCING.md`
 6. `IMPLEMENTATION_SUMMARY.md`
+7. `TEST_BALANCING.md`
+8. `ENDPOINTS_DIFFERENCE.md`
 
 ### Modified files:
 1. `common/config.go` - added server configuration
@@ -55,6 +57,8 @@
 5. `api/session.go` - integration with assignment cleanup
 6. `api/session_test.go` - updated test
 7. `domain/models_suite.go` - added `CreateGatewayWithName`
+8. `api/api_v1.go` - updated `V1ListRooms` and `V1GetRoom` to show dynamic assignments
+9. `domain/room_server_assignments.go` - changed to sequential filling strategy
 
 ## How It Works
 
