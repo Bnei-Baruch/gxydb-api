@@ -667,6 +667,22 @@ func (l *MQTTListener) GetGatewayStatuses() map[string]*common.GatewayStatusInfo
 	return result
 }
 
+// IsGatewayOnline implements GatewayStatusChecker interface
+// Returns true if gateway is online, false if offline or unknown
+func (l *MQTTListener) IsGatewayOnline(serverName string) bool {
+	l.gatewayStatusesMu.RLock()
+	defer l.gatewayStatusesMu.RUnlock()
+	
+	if status, ok := l.gatewayStatuses[serverName]; ok {
+		status.mu.RLock()
+		defer status.mu.RUnlock()
+		return status.Online
+	}
+	
+	// Unknown server - assume offline
+	return false
+}
+
 type PahoLogAdapter struct {
 	level zerolog.Level
 }

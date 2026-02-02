@@ -276,5 +276,12 @@ func (a *App) initMQTT() {
 		if err := a.mqttListener.Start(); err != nil {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
 		}
+		
+		// Connect room server assignment manager to MQTT for online status checks
+		// This ensures offline servers are not assigned to new rooms
+		if a.roomServerAssignmentManager != nil {
+			a.roomServerAssignmentManager.SetStatusChecker(a.mqttListener)
+			log.Info().Msg("Connected room assignment manager to MQTT status checker")
+		}
 	}
 }

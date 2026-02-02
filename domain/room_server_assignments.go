@@ -26,12 +26,18 @@ type ServerLoad struct {
 	Load        int
 }
 
+// GatewayStatusChecker interface for checking if gateway is online
+type GatewayStatusChecker interface {
+	IsGatewayOnline(serverName string) bool
+}
+
 type RoomServerAssignmentManager struct {
 	db                 common.DBInterface
 	availableServers   []string
 	maxServerCapacity  int
 	avgRoomOccupancy   int
 	serverRegions      map[string][]string
+	statusChecker      GatewayStatusChecker // Optional: for checking online status
 }
 
 func NewRoomServerAssignmentManager(db common.DBInterface, servers []string, maxCapacity, avgOccupancy int, regions map[string][]string) *RoomServerAssignmentManager {
@@ -41,7 +47,13 @@ func NewRoomServerAssignmentManager(db common.DBInterface, servers []string, max
 		maxServerCapacity:  maxCapacity,
 		avgRoomOccupancy:   avgOccupancy,
 		serverRegions:      regions,
+		statusChecker:      nil, // Will be set via SetStatusChecker if needed
 	}
+}
+
+// SetStatusChecker sets the gateway status checker
+func (m *RoomServerAssignmentManager) SetStatusChecker(checker GatewayStatusChecker) {
+	m.statusChecker = checker
 }
 
 // GetOrAssignServer returns the assigned server for a room or assigns a new one
@@ -209,6 +221,11 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 				continue
 			}
 
+			// Skip offline servers
+			if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(server) {
+				continue
+			}
+
 			load := loads[server]
 			// Check if server has capacity for one more room
 			if load+m.avgRoomOccupancy > m.maxServerCapacity {
@@ -233,6 +250,11 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 	for _, server := range m.availableServers {
 		// Skip servers reserved for other regions
 		if reservedServers[server] {
+			continue
+		}
+		
+		// Skip offline servers
+		if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(server) {
 			continue
 		}
 		
