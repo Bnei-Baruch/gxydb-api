@@ -172,13 +172,13 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load dynamic assignments from room_server_assignments (Scale Mode)
-	assignments := make(map[int64]string) // room_id -> gateway_name
+	assignments := make(map[string]string) // room_id -> gateway_name
 	if common.Config.ScaleMode {
 		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
-				var roomID int64
+				var roomID string
 				var gatewayName string
 				if err := rows.Scan(&roomID, &gatewayName); err == nil {
 					assignments[roomID] = gatewayName
@@ -197,7 +197,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 
 		// Use dynamic assignment if exists, otherwise use default gateway
 		var gateway *models.Gateway
-		if gatewayName, ok := assignments[room.ID]; ok {
+		if gatewayName, ok := assignments[room.GatewayUID]; ok {
 			gateway, _ = a.cache.gateways.ByName(gatewayName)
 		}
 
