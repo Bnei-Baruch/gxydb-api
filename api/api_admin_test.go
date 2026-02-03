@@ -319,7 +319,7 @@ func (s *ApiTestSuite) TestAdmin_CreateRoomBadRequest() {
 	// non existing gateway
 	body := models.Room{
 		Name:       fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
-		GatewayUID: rand.Intn(math.MaxInt32),
+		GatewayUID: fmt.Sprintf("%d", rand.Intn(math.MaxInt32)),
 	}
 	b, _ := json.Marshal(body)
 	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
@@ -332,7 +332,7 @@ func (s *ApiTestSuite) TestAdmin_CreateRoomBadRequest() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	body.DefaultGatewayID = gateway.ID
-	body.GatewayUID = -8
+	body.GatewayUID = "-8"
 	b, _ = json.Marshal(body)
 	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
 	s.apiAuthP(req, []string{common.RoleRoot})
@@ -351,7 +351,7 @@ func (s *ApiTestSuite) TestAdmin_CreateRoomBadRequest() {
 
 	// existing name
 	body.Name = room.Name
-	body.GatewayUID = room.GatewayUID + 1
+	body.GatewayUID = room.GatewayUID + "_1"
 	b, _ = json.Marshal(body)
 	req, _ = http.NewRequest("POST", "/admin/rooms", bytes.NewBuffer(b))
 	s.apiAuthP(req, []string{common.RoleRoot})
@@ -433,7 +433,7 @@ func (s *ApiTestSuite) TestAdmin_UpdateRoomBadRequest() {
 	// non existing gateway
 	body := models.Room{
 		Name:       fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
-		GatewayUID: rand.Intn(math.MaxInt32),
+		GatewayUID: fmt.Sprintf("%d", rand.Intn(math.MaxInt32)),
 	}
 	b, _ := json.Marshal(body)
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
@@ -443,7 +443,7 @@ func (s *ApiTestSuite) TestAdmin_UpdateRoomBadRequest() {
 
 	// invalid gateway uid
 	body.DefaultGatewayID = gateway.ID
-	body.GatewayUID = -8
+	body.GatewayUID = "-8"
 	b, _ = json.Marshal(body)
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/admin/rooms/%d", room.ID), bytes.NewBuffer(b))
 	s.apiAuthP(req, []string{common.RoleRoot})
@@ -486,7 +486,7 @@ func (s *ApiTestSuite) TestAdmin_UpdateRoom() {
 
 	payload := models.Room{
 		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
-		GatewayUID:       rand.Intn(math.MaxInt16),
+		GatewayUID:       fmt.Sprintf("%d", rand.Intn(math.MaxInt16)),
 		DefaultGatewayID: gateway.ID,
 		Region:           null.StringFrom("region"),
 	}
@@ -547,7 +547,7 @@ func (s *ApiTestSuite) TestAdmin_DeleteRoom() {
 
 	payload := models.Room{
 		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
-		GatewayUID:       rand.Intn(math.MaxInt16),
+		GatewayUID:       fmt.Sprintf("%d", rand.Intn(math.MaxInt16)),
 		DefaultGatewayID: gateway.ID,
 	}
 	b, _ := json.Marshal(payload)

@@ -73,7 +73,7 @@ func (s *ModelsSuite) CreateRoom(gateway *models.Gateway) *models.Room {
 	room := &models.Room{
 		Name:             fmt.Sprintf("room_%s", stringutil.GenerateName(10)),
 		DefaultGatewayID: gateway.ID,
-		GatewayUID:       fmt.Sprintf("%d", rand.Intn(math.MaxInt32)), // GatewayUID is now string
+		GatewayUID:       fmt.Sprintf("%d", rand.Intn(math.MaxInt32)),
 	}
 	s.Require().NoError(room.Insert(s.DB, boil.Infer()))
 	return room
@@ -82,7 +82,7 @@ func (s *ModelsSuite) CreateRoom(gateway *models.Gateway) *models.Room {
 func (s *ModelsSuite) CreateSession(user *models.User, gateway *models.Gateway, room *models.Room) *models.Session {
 	session := &models.Session{
 		UserID:         user.ID,
-		RoomID:         null.StringFrom(fmt.Sprintf("%d", room.GatewayUID)), // Use Janus room ID
+		RoomID:         null.StringFrom(room.GatewayUID), // Use Janus room ID
 		GatewayID:      null.Int64From(gateway.ID),
 		GatewaySession: null.Int64From(rand.Int63n(math.MaxInt32)),
 		GatewayHandle:  null.Int64From(rand.Int63n(math.MaxInt32)),

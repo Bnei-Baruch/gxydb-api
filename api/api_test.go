@@ -77,7 +77,7 @@ func (s *ApiTestSuite) TestListGroups() {
 		roomPerGateway: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
 		gateways[gateway.ID] = gateway
@@ -118,8 +118,8 @@ func (s *ApiTestSuite) TestListGroupsWithNumUsers() {
 		roomPerGateway: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
-	roomNumUsers := make(map[int]int)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
+	roomNumUsers := make(map[string]int)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
 		gateways[gateway.ID] = gateway
@@ -339,7 +339,7 @@ func (s *ApiTestSuite) TestListRooms() {
 		sessionsPerRoom: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	sessions := make(map[string]*models.Session, counts.gateways*counts.roomPerGateway*counts.sessionsPerRoom)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
@@ -605,7 +605,7 @@ func (s *ApiTestSuite) TestListUsers() {
 		sessionsPerRoom: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	sessions := make(map[string]*models.Session, counts.gateways*counts.roomPerGateway*counts.sessionsPerRoom)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()

@@ -306,7 +306,7 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 
 	// Update last_used_at for room server assignment
 	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
-		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.Int64); err != nil {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.String); err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
 		}
 	}
@@ -344,11 +344,11 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 
 	s := models.Session{
 		UserID:                userID,
-		RoomID:                null.Int64From(room.ID),
+		RoomID:                null.StringFrom(fmt.Sprintf("%d", room.ID)),
 		GatewayID:             null.Int64From(gateway.ID),
 		GatewaySession:        null.Int64From(user.Session),
 		GatewayHandle:         null.Int64From(user.Handle),
-		GatewayFeed:           null.Int64From(user.RFID),
+		GatewayFeed:           null.StringFrom(user.RFID),
 		GatewayHandleTextroom: null.Int64From(user.TextroomHandle),
 		Display:               null.StringFrom(user.Display),
 		Camera:                user.Camera,

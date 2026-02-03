@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sort"
-	"strconv"
 
 	"github.com/edoshor/janus-go"
 	"github.com/gorilla/mux"
@@ -95,11 +94,7 @@ func (a *App) V1CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	var data V1RoomInfo
 	if err := httputil.DecodeJSONBody(w, r, &data); err != nil {
@@ -120,7 +115,7 @@ func (a *App) V1CreateGroup(w http.ResponseWriter, r *http.Request) {
 		GatewayUID:       id,
 	}
 
-	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		if err := room.Upsert(tx, true, []string{models.RoomColumns.GatewayUID}, boil.Infer(), boil.Infer()); err != nil {
 			return pkgerr.WithStack(err)
 		}
@@ -193,11 +188,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	cachedRoom, ok := a.cache.rooms.ByGatewayUID(id)
 	if !ok {
@@ -244,11 +235,7 @@ func (a *App) V1UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	room, ok := a.cache.rooms.ByGatewayUID(id)
 	if !ok {
@@ -270,7 +257,7 @@ func (a *App) V1UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		if _, err := room.Update(tx, boil.Whitelist(models.RoomColumns.Extra)); err != nil {
 			return pkgerr.WithStack(err)
 		}
@@ -495,7 +482,7 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 			}
 
 			cRooms[i] = &models.CompositesRoom{
-				RoomID:    room.ID,
+				RoomID:    fmt.Sprintf("%d", room.ID),
 				GatewayID: gateway.ID,
 				Position:  i + 1,
 			}
@@ -624,7 +611,7 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,
-		RFID:           session.GatewayFeed.Int64,
+		RFID:           session.GatewayFeed.String,
 		TextroomHandle: session.GatewayHandleTextroom.Int64,
 		Camera:         session.Camera,
 		Question:       session.Question,

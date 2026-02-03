@@ -26,7 +26,7 @@ type Room struct {
 	ID               int64       `boil:"id" json:"id" toml:"id" yaml:"id"`
 	Name             string      `boil:"name" json:"name" toml:"name" yaml:"name"`
 	DefaultGatewayID int64       `boil:"default_gateway_id" json:"default_gateway_id" toml:"default_gateway_id" yaml:"default_gateway_id"`
-	GatewayUID       int         `boil:"gateway_uid" json:"gateway_uid" toml:"gateway_uid" yaml:"gateway_uid"`
+	GatewayUID       string      `boil:"gateway_uid" json:"gateway_uid" toml:"gateway_uid" yaml:"gateway_uid"`
 	Disabled         bool        `boil:"disabled" json:"disabled" toml:"disabled" yaml:"disabled"`
 	Properties       null.JSON   `boil:"properties" json:"properties,omitempty" toml:"properties" yaml:"properties,omitempty"`
 	CreatedAt        time.Time   `boil:"created_at" json:"created_at" toml:"created_at" yaml:"created_at"`
@@ -97,7 +97,7 @@ var RoomWhere = struct {
 	ID               whereHelperint64
 	Name             whereHelperstring
 	DefaultGatewayID whereHelperint64
-	GatewayUID       whereHelperint
+	GatewayUID       whereHelperstring
 	Disabled         whereHelperbool
 	Properties       whereHelpernull_JSON
 	CreatedAt        whereHelpertime_Time
@@ -109,7 +109,7 @@ var RoomWhere = struct {
 	ID:               whereHelperint64{field: "\"rooms\".\"id\""},
 	Name:             whereHelperstring{field: "\"rooms\".\"name\""},
 	DefaultGatewayID: whereHelperint64{field: "\"rooms\".\"default_gateway_id\""},
-	GatewayUID:       whereHelperint{field: "\"rooms\".\"gateway_uid\""},
+	GatewayUID:       whereHelperstring{field: "\"rooms\".\"gateway_uid\""},
 	Disabled:         whereHelperbool{field: "\"rooms\".\"disabled\""},
 	Properties:       whereHelpernull_JSON{field: "\"rooms\".\"properties\""},
 	CreatedAt:        whereHelpertime_Time{field: "\"rooms\".\"created_at\""},
