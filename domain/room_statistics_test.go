@@ -43,11 +43,11 @@ func (s *RoomStatisticsTestSuite) TestGetAll() {
 	roomStats := make(map[string]*models.RoomStatistic)
 	for i := 0; i < 5; i++ {
 		room := s.CreateRoom(gateway)
-		roomStats[fmt.Sprintf("%d", room.ID)] = &models.RoomStatistic{
-			RoomID: fmt.Sprintf("%d", room.ID),
+		roomStats[room.GatewayUID] = &models.RoomStatistic{
+			RoomID: room.GatewayUID,
 			OnAir:  i,
 		}
-		err = roomStats[fmt.Sprintf("%d", room.ID)].Insert(s.DB, boil.Infer())
+		err = roomStats[room.GatewayUID].Insert(s.DB, boil.Infer())
 		s.Require().NoError(err)
 	}
 
@@ -68,11 +68,11 @@ func (s *RoomStatisticsTestSuite) TestReset() {
 	roomStats := make(map[string]*models.RoomStatistic)
 	for i := 0; i < 5; i++ {
 		room := s.CreateRoom(gateway)
-		roomStats[fmt.Sprintf("%d", room.ID)] = &models.RoomStatistic{
-			RoomID: fmt.Sprintf("%d", room.ID),
+		roomStats[room.GatewayUID] = &models.RoomStatistic{
+			RoomID: room.GatewayUID,
 			OnAir:  i,
 		}
-		err := roomStats[fmt.Sprintf("%d", room.ID)].Insert(s.DB, boil.Infer())
+		err := roomStats[room.GatewayUID].Insert(s.DB, boil.Infer())
 		s.Require().NoError(err)
 	}
 
@@ -99,7 +99,7 @@ func (s *RoomStatisticsTestSuite) TestOnAir() {
 	room := s.CreateRoom(gateway)
 
 	for i := 0; i < 3; i++ {
-		err = rms.OnAir(fmt.Sprintf("%d", room.ID))
+		err = rms.OnAir(room.GatewayUID)
 		s.Require().NoError(err)
 		rs, err = rms.GetAll()
 		s.Require().NoError(err)

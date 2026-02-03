@@ -108,7 +108,7 @@ func (s *ModelsSuite) CreateComposite(rooms []*models.Room) *models.Composite {
 	cRooms := make([]*models.CompositesRoom, len(rooms))
 	for i, room := range rooms {
 		cRooms[i] = &models.CompositesRoom{
-			RoomID:    fmt.Sprintf("%d", room.ID),
+			RoomID:    room.GatewayUID,
 			GatewayID: room.DefaultGatewayID,
 			Position:  i + 1,
 		}

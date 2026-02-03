@@ -37,13 +37,13 @@ func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_NewAssignment() {
 	room := s.CreateRoom(gateway)
 
 	// First call should create an assignment
-	server1, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room.ID), "")
+	server1, err := manager.GetOrAssignServer(context.Background(), room.GatewayUID, "")
 	s.Require().NoError(err)
 	s.NotEmpty(server1)
 	s.Contains([]string{"gxy1", "gxy2", "gxy3"}, server1)
 
 	// Second call should return the same server (sticky routing)
-	server2, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room.ID), "")
+	server2, err := manager.GetOrAssignServer(context.Background(), room.GatewayUID, "")
 	s.Require().NoError(err)
 	s.Equal(server1, server2)
 }
@@ -67,7 +67,7 @@ func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_LoadBalancing() {
 	s.CreateSession(user2, gateway1, room1)
 
 	// New room should be assigned to gxy2 (least loaded)
-	server, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room3.ID), "")
+	server, err := manager.GetOrAssignServer(context.Background(), room3.GatewayUID, "")
 	s.Require().NoError(err)
 	s.Equal("gxy2", server)
 }
@@ -81,9 +81,9 @@ func (s *RoomServerAssignmentTestSuite) TestCleanInactiveAssignments() {
 	user := s.CreateUser()
 
 	// Assign both rooms
-	_, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room1.ID), "")
+	_, err := manager.GetOrAssignServer(context.Background(), room1.GatewayUID, "")
 	s.Require().NoError(err)
-	_, err = manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room2.ID), "")
+	_, err = manager.GetOrAssignServer(context.Background(), room2.GatewayUID, "")
 	s.Require().NoError(err)
 
 	// Create session only for room1
@@ -94,13 +94,13 @@ func (s *RoomServerAssignmentTestSuite) TestCleanInactiveAssignments() {
 	s.Require().NoError(err)
 
 	// room1 should still have assignment
-	server1, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room1.ID), "")
+	server1, err := manager.GetOrAssignServer(context.Background(), room1.GatewayUID, "")
 	s.Require().NoError(err)
 	s.NotEmpty(server1)
 
 	// room2 should get a new assignment (was cleaned)
 	// We can't directly check if it was cleaned, but GetOrAssignServer should work
-	server2, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room2.ID), "")
+	server2, err := manager.GetOrAssignServer(context.Background(), room2.GatewayUID, "")
 	s.Require().NoError(err)
 	s.NotEmpty(server2)
 }
@@ -120,17 +120,17 @@ func (s *RoomServerAssignmentTestSuite) TestGetOrAssignServer_RegionalRouting() 
 	room2 := s.CreateRoom(gateway3)
 
 	// First user from IL should get gxy1 or gxy2
-	server1, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room1.ID), "IL")
+	server1, err := manager.GetOrAssignServer(context.Background(), room1.GatewayUID, "IL")
 	s.Require().NoError(err)
 	s.Contains([]string{"gxy1", "gxy2"}, server1)
 
 	// First user from US should get gxy3 or gxy4
-	server2, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room2.ID), "US")
+	server2, err := manager.GetOrAssignServer(context.Background(), room2.GatewayUID, "US")
 	s.Require().NoError(err)
 	s.Contains([]string{"gxy3", "gxy4"}, server2)
 
 	// Second user from different region should get same server (sticky routing)
-	server1Again, err := manager.GetOrAssignServer(context.Background(), fmt.Sprintf("%d", room1.ID), "US")
+	server1Again, err := manager.GetOrAssignServer(context.Background(), room1.GatewayUID, "US")
 	s.Require().NoError(err)
 	s.Equal(server1, server1Again) // Should ignore "US" and return same server
 }

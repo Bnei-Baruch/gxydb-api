@@ -344,7 +344,7 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 
 	s := models.Session{
 		UserID:                userID,
-		RoomID:                null.StringFrom(fmt.Sprintf("%d", room.ID)),
+		RoomID:                null.StringFrom(room.GatewayUID),
 		GatewayID:             null.Int64From(gateway.ID),
 		GatewaySession:        null.Int64From(user.Session),
 		GatewayHandle:         null.Int64From(user.Handle),

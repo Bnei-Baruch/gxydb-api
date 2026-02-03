@@ -481,11 +481,11 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %d", item.Room))
 			}
 
-			cRooms[i] = &models.CompositesRoom{
-				RoomID:    fmt.Sprintf("%d", room.ID),
-				GatewayID: gateway.ID,
-				Position:  i + 1,
-			}
+		cRooms[i] = &models.CompositesRoom{
+			RoomID:    room.GatewayUID,
+			GatewayID: gateway.ID,
+			Position:  i + 1,
+		}
 		}
 
 		if _, err := composite.CompositesRooms().DeleteAll(tx); err != nil {
