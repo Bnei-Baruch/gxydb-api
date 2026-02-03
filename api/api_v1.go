@@ -27,7 +27,7 @@ import (
 func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 
-	roomCounts := make(map[int64]int)
+	roomCounts := make(map[string]int64)
 	if withNumUsers := params.Get("with_num_users"); withNumUsers == "true" {
 		// fetch num_users for each room from sessions table.
 		// we distinct by user_id as we do in every other place (makeV1Room)
@@ -43,10 +43,9 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for rows.Next() {
-			var roomID int64
-			var numUsers int
+			var roomID string
+			var numUsers int64
 			if err := rows.Scan(&roomID, &numUsers); err != nil {
-				httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 				return
 			}
 			roomCounts[roomID] = numUsers
@@ -58,25 +57,51 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get room server assignments if SCALE mode is enabled
+	roomAssignments := make(map[string]string) // roomID -> gatewayName
+	if a.roomServerAssignmentManager != nil && common.Config.ScaleMode {
+		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
+		if err != nil {
+			log.Ctx(r.Context()).Error().Err(err).Msg("Failed to fetch room assignments")
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var roomID, gatewayName string
+				if err := rows.Scan(&roomID, &gatewayName); err == nil {
+					roomAssignments[roomID] = gatewayName
+				}
+			}
+		}
+	}
+
 	// get rooms from cache
 	rooms := a.cache.rooms.Values()
 	roomInfos := make([]*V1Room, len(rooms))
 	for i := range rooms {
 		room := rooms[i]
 
-		gateway, ok := a.cache.gateways.ByID(room.DefaultGatewayID)
-		if !ok {
-			log.Ctx(r.Context()).Error().Msgf("gateways cache miss %d [room %d]", room.DefaultGatewayID, room.ID)
-			continue
+		// Determine which gateway to use
+		var gatewayName string
+		if assignedGateway, ok := roomAssignments[room.GatewayUID]; ok {
+			// Use assigned gateway from room_server_assignments
+			gatewayName = assignedGateway
+		} else {
+			// Fallback to default gateway
+			gateway, ok := a.cache.gateways.ByID(room.DefaultGatewayID)
+			if !ok {
+				log.Ctx(r.Context()).Error().Msgf("gateways cache miss %d [room %d]", room.DefaultGatewayID, room.ID)
+				continue
+			}
+			gatewayName = gateway.Name
 		}
 
 		roomInfos[i] = &V1Room{
 			V1RoomInfo: V1RoomInfo{
 				Room:        room.GatewayUID,
-				Janus:       gateway.Name,
+				Janus:       gatewayName,
 				Description: room.Name,
 			},
-			NumUsers: roomCounts[room.ID],
+			NumUsers: int(roomCounts[room.GatewayUID]),
 		}
 	}
 
