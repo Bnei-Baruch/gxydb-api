@@ -188,6 +188,16 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Str("topic", m.Topic()).
 		Int("payload_size", len(m.Payload())).
 		Msg("MQTT service protocol message")
+	
+	// Full payload in debug mode
+	log.Debug().
+		Str("topic", m.Topic()).
+		Bytes("payload", m.Payload()).
+		Bool("duplicate", m.Duplicate()).
+		Int8("qos", int8(m.Qos())).
+		Bool("retained", m.Retained()).
+		Uint16("message_id", m.MessageID()).
+		Msg("MQTT service protocol details")
 
 	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
 	go func() {
@@ -202,6 +212,16 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 		Str("topic", m.Topic()).
 		Int("payload_size", len(m.Payload())).
 		Msg("MQTT event message")
+	
+	// Full payload in debug mode
+	log.Debug().
+		Str("topic", m.Topic()).
+		Bytes("payload", m.Payload()).
+		Bool("duplicate", m.Duplicate()).
+		Int8("qos", int8(m.Qos())).
+		Bool("retained", m.Retained()).
+		Uint16("message_id", m.MessageID()).
+		Msg("MQTT event details")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
@@ -222,6 +242,17 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 		Str("topic", m.Topic()).
 		Int("payload_size", len(m.Payload())).
 		Msg("MQTT update session")
+	
+	// Full payload in debug mode
+	log.Debug().
+		Str("topic", m.Topic()).
+		Bytes("payload", m.Payload()).
+		Bool("duplicate", m.Duplicate()).
+		Int8("qos", int8(m.Qos())).
+		Bool("retained", m.Retained()).
+		Uint16("message_id", m.MessageID()).
+		Msg("MQTT update session details")
+	
 	var user *V1User
 	if err := json.Unmarshal(m.Payload(), &user); err != nil {
 		log.Error().Err(err).Msg("json.Unmarshal")
