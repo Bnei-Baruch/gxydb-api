@@ -8,6 +8,7 @@ import (
 	"github.com/subosito/gotenv"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
+	"github.com/Bnei-Baruch/gxydb-api/middleware"
 )
 
 var rootCmd = &cobra.Command{
@@ -30,4 +31,5 @@ func Execute() {
 func initConfig() {
 	gotenv.Load()
 	common.Init()
+	middleware.InitLogLevel() // Apply log level from config
 }

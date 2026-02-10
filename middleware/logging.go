@@ -13,12 +13,14 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/rs/zerolog/pkgerrors"
 
+	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/instrumentation"
 )
 
 var requestLog = zerolog.New(os.Stdout).With().Timestamp().Caller().Stack().Logger()
 
 func init() {
+	// Set default log level (will be updated after config is loaded via InitLogLevel)
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
 	zerolog.CallerFieldName = "line"
@@ -31,6 +33,36 @@ func init() {
 	zerolog.TimestampFieldName = "timestamp"
 	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	log.With().Stack()
+}
+
+// InitLogLevel sets the global log level from config
+// Should be called after common.Init()
+func InitLogLevel() {
+	if common.Config == nil {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		return
+	}
+
+	level := zerolog.InfoLevel // default
+	switch strings.ToLower(common.Config.LogLevel) {
+	case "trace":
+		level = zerolog.TraceLevel
+	case "debug":
+		level = zerolog.DebugLevel
+	case "info":
+		level = zerolog.InfoLevel
+	case "warn", "warning":
+		level = zerolog.WarnLevel
+	case "error":
+		level = zerolog.ErrorLevel
+	case "fatal":
+		level = zerolog.FatalLevel
+	case "panic":
+		level = zerolog.PanicLevel
+	}
+
+	zerolog.SetGlobalLevel(level)
+	log.Info().Str("level", level.String()).Msg("Log level set")
 }
 
 func LoggingMiddleware(next http.Handler) http.Handler {
