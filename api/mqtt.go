@@ -184,14 +184,10 @@ func (l *MQTTListener) Close() {
 }
 
 func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
-	log.Debug().
-		Bool("Duplicate", m.Duplicate()).
-		Int8("QOS", int8(m.Qos())).
-		Bool("Retained", m.Retained()).
-		Str("Topic", m.Topic()).
-		Uint16("MessageID", m.MessageID()).
-		Bytes("payload", m.Payload()).
-		Msg("MQTT handle service protocol")
+	log.Info().
+		Str("topic", m.Topic()).
+		Int("payload_size", len(m.Payload())).
+		Msg("MQTT service protocol message")
 
 	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
 	go func() {
@@ -202,14 +198,10 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
-	log.Debug().
-		Bool("Duplicate", m.Duplicate()).
-		Int8("QOS", int8(m.Qos())).
-		Bool("Retained", m.Retained()).
-		Str("Topic", m.Topic()).
-		Uint16("MessageID", m.MessageID()).
-		Bytes("payload", m.Payload()).
-		Msg("MQTT handle event")
+	log.Info().
+		Str("topic", m.Topic()).
+		Int("payload_size", len(m.Payload())).
+		Msg("MQTT event message")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
@@ -226,14 +218,10 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
-	log.Debug().
-		Bool("Duplicate", m.Duplicate()).
-		Int8("QOS", int8(m.Qos())).
-		Bool("Retained", m.Retained()).
-		Str("Topic", m.Topic()).
-		Uint16("MessageID", m.MessageID()).
-		Bytes("payload", m.Payload()).
-		Msg("MQTT update user session")
+	log.Info().
+		Str("topic", m.Topic()).
+		Int("payload_size", len(m.Payload())).
+		Msg("MQTT update session")
 	var user *V1User
 	if err := json.Unmarshal(m.Payload(), &user); err != nil {
 		log.Error().Err(err).Msg("json.Unmarshal")
