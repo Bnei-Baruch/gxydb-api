@@ -52,6 +52,7 @@ func (a *App) Initialize() {
 	db.SetMaxIdleConns(common.Config.DBMaxIdleConns)
 	db.SetMaxOpenConns(common.Config.DBMaxOpenConns)
 	db.SetConnMaxLifetime(common.Config.DBConnMaxLifetime)
+	db.SetConnMaxIdleTime(common.Config.DBConnMaxIdleTime)
 
 	var tokenVerifier middleware.OIDCTokenVerifier
 	if !common.Config.SkipAuth {
