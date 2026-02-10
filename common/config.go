@@ -32,6 +32,7 @@ type config struct {
 	MQTTPassword          string
 	MQTTSecure            bool
 	VHUrl                 string
+	LogLevel              string              // Log level: trace, debug, info, warn, error (default: info)
 	AvailableJanusServers []string
 	MaxServerCapacity     int
 	AvgRoomOccupancy      int
@@ -66,6 +67,7 @@ func newConfig() *config {
 		MQTTPassword:          "",
 		MQTTSecure:            false,
 		VHUrl:                 "https://api.kli.one",
+		LogLevel:              "info", // default: info
 		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
 		MaxServerCapacity:     400,
 		AvgRoomOccupancy:      10,
@@ -176,6 +178,9 @@ func Init() {
 	}
 	if val := os.Getenv("VH_URL"); val != "" {
 		Config.VHUrl = val
+	}
+	if val := os.Getenv("LOG_LEVEL"); val != "" {
+		Config.LogLevel = strings.ToLower(val)
 	}
 	if val := os.Getenv("AVAILABLE_JANUS_SERVERS"); val != "" {
 		Config.AvailableJanusServers = strings.Split(val, ",")
