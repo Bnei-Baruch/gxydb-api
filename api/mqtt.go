@@ -236,7 +236,7 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 		Msg("MQTT update user session")
 	var user *V1User
 	if err := json.Unmarshal(m.Payload(), &user); err != nil {
-		log.Error().Err(err).Msg("json.Unmarshal")
+		log.Error().Err(err).Bytes("payload", m.Payload()).Msg("json.Unmarshal")
 		return
 	}
 	ctx := context.Background()
@@ -603,6 +603,19 @@ func (l *MQTTListener) triggerFailover(ctx context.Context, failedServer string)
 		Str("failed_server", failedServer).
 		Str("failover_server", failoverServer).
 		Msg("Failover completed successfully")
+}
+
+// IsGatewayOnline implements domain.GatewayStatusChecker
+func (l *MQTTListener) IsGatewayOnline(serverName string) bool {
+	l.gatewayStatusesMu.RLock()
+	defer l.gatewayStatusesMu.RUnlock()
+
+	if status, ok := l.gatewayStatuses[serverName]; ok {
+		status.mu.RLock()
+		defer status.mu.RUnlock()
+		return status.Online
+	}
+	return false
 }
 
 // getAlivePrimaryServers returns list of alive primary servers

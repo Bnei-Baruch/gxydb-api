@@ -52,6 +52,7 @@ func (a *App) Initialize() {
 	db.SetMaxIdleConns(common.Config.DBMaxIdleConns)
 	db.SetMaxOpenConns(common.Config.DBMaxOpenConns)
 	db.SetConnMaxLifetime(common.Config.DBConnMaxLifetime)
+	db.SetConnMaxIdleTime(common.Config.DBConnMaxIdleTime)
 
 	var tokenVerifier middleware.OIDCTokenVerifier
 	if !common.Config.SkipAuth {
@@ -275,6 +276,13 @@ func (a *App) initMQTT() {
 		a.mqttListener = NewMQTTListener(a.cache, a.serviceProtocolHandler, a.sessionManager, common.Config.GatewayPluginAdminKey, a.roomServerAssignmentManager)
 		if err := a.mqttListener.Start(); err != nil {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
+		}
+		
+		// Connect room server assignment manager to MQTT for online status checks
+		// This ensures offline servers are not assigned to new rooms
+		if a.roomServerAssignmentManager != nil {
+			a.roomServerAssignmentManager.SetStatusChecker(a.mqttListener)
+			log.Info().Msg("Connected room assignment manager to MQTT status checker")
 		}
 	}
 }

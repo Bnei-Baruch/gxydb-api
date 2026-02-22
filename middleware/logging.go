@@ -20,7 +20,6 @@ import (
 var requestLog = zerolog.New(os.Stdout).With().Timestamp().Caller().Stack().Logger()
 
 func init() {
-	// Set default log level (will be updated after config is loaded)
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
 	zerolog.CallerFieldName = "line"

@@ -27,6 +27,7 @@ type config struct {
 	DBMaxIdleConns        int
 	DBMaxOpenConns        int
 	DBConnMaxLifetime     time.Duration
+	DBConnMaxIdleTime     time.Duration
 	MQTTBrokerUrl         string
 	MQTTClientID          string
 	MQTTPassword          string
@@ -163,6 +164,13 @@ func Init() {
 			panic(err)
 		}
 		Config.DBConnMaxLifetime = pVal
+	}
+	if val := os.Getenv("DB_CONN_MAX_IDLE_TIME"); val != "" {
+		pVal, err := time.ParseDuration(val)
+		if err != nil {
+			panic(err)
+		}
+		Config.DBConnMaxIdleTime = pVal
 	}
 	if val := os.Getenv("MQTT_BROKER_URL"); val != "" {
 		Config.MQTTBrokerUrl = val
