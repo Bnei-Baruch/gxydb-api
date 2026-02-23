@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -327,11 +326,13 @@ func (l *MQTTListener) HandleGatewayStatus(c mqtt.Client, m mqtt.Message) {
 			return
 		}
 
-		// Check if this is a Janus gateway (gxy*)
 		serverName := parts[1]
-		matched, _ := regexp.MatchString(`gxy\d+`, serverName)
-		if !matched {
-			log.Debug().Str("server", serverName).Msg("HandleGatewayStatus: ignoring non-gateway server")
+
+		// Only process servers we're tracking
+		l.gatewayStatusesMu.RLock()
+		_, tracked := l.gatewayStatuses[serverName]
+		l.gatewayStatusesMu.RUnlock()
+		if !tracked {
 			return
 		}
 

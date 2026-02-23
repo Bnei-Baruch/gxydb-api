@@ -41,11 +41,13 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 			return
 		}
+		defer rows.Close()
 
 		for rows.Next() {
 			var roomID string
 			var numUsers int64
 			if err := rows.Scan(&roomID, &numUsers); err != nil {
+				httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 				return
 			}
 			roomCounts[roomID] = numUsers
@@ -243,7 +245,7 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 	var gateway *models.Gateway
 	if common.Config.ScaleMode {
 		var gatewayName string
-		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.ID).Scan(&gatewayName)
+		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.GatewayUID).Scan(&gatewayName)
 		if err == nil {
 			gateway, _ = a.cache.gateways.ByName(gatewayName)
 		}
@@ -503,14 +505,14 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 			}
 			room, ok := a.cache.rooms.ByGatewayUID(item.Room)
 			if !ok {
-				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %d", item.Room))
+				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %s", item.Room))
 			}
 
-		cRooms[i] = &models.CompositesRoom{
-			RoomID:    room.GatewayUID,
-			GatewayID: gateway.ID,
-			Position:  i + 1,
-		}
+			cRooms[i] = &models.CompositesRoom{
+				RoomID:    room.GatewayUID,
+				GatewayID: gateway.ID,
+				Position:  i + 1,
+			}
 		}
 
 		if _, err := composite.CompositesRooms().DeleteAll(tx); err != nil {

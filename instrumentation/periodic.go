@@ -124,26 +124,9 @@ func (pc *PeriodicCollector) collectGatewaySessions() {
 		//        Move this monitoring logic to strdb and remove from gxydb-api.
 		for _, serverName := range common.Config.StrJanusServers {
 			if status, ok := statuses[serverName]; ok {
-				// Use data from MQTT - streaming type
 				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeStreaming).Set(float64(status.Sessions))
-
-				// Log if gateway is offline or stale
-				if !status.Online {
-					log.Debug().Str("gateway", serverName).Str("type", "streaming").Msg("Gateway is offline")
-				} else if time.Since(status.LastSeen) > 60*time.Second {
-					log.Warn().
-						Str("gateway", serverName).
-						Str("type", "streaming").
-						Dur("since_last_seen", time.Since(status.LastSeen)).
-						Msg("Gateway status is stale")
-				}
 			} else {
-				// Gateway not found in MQTT statuses - set to 0
 				Stats.GatewaySessionsGauge.WithLabelValues(serverName, common.GatewayTypeStreaming).Set(0)
-				log.Debug().
-					Str("gateway", serverName).
-					Str("type", "streaming").
-					Msg("Gateway not found in MQTT statuses")
 			}
 		}
 

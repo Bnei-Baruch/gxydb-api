@@ -168,7 +168,7 @@ func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, 
 
 func (sm *V1SessionManager) onProtocolEnter(ctx context.Context, tx *sql.Tx, pMsg *V1ProtocolMessageText) error {
 	logger := log.Ctx(ctx)
-	logger.Info().Msgf("%s has enter room %d", pMsg.User.ID, pMsg.User.Room)
+	logger.Info().Msgf("%s has enter room %s", pMsg.User.ID, pMsg.User.Room)
 
 	userID, err := sm.getInternalUserID(ctx, tx, &pMsg.User)
 	if err != nil {
@@ -260,7 +260,7 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 
 	// Get room_id before closing session to check for assignment cleanup
-	var roomID null.Int64
+	var roomID null.String
 	err = queries.Raw("SELECT room_id FROM sessions WHERE user_id = $1 AND removed_at IS NULL LIMIT 1", userID).
 		QueryRow(tx).Scan(&roomID)
 	if err != nil && err != sql.ErrNoRows {
@@ -334,7 +334,7 @@ func WrappingProtocolError(err error, msg string) *ProtocolError {
 func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Session, error) {
 	room, ok := sm.cache.rooms.ByGatewayUID(user.Room)
 	if !ok {
-		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %d", user.Room))
+		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %s", user.Room))
 	}
 
 	gateway, ok := sm.cache.gateways.ByName(user.Janus)
