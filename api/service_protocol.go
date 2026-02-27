@@ -40,10 +40,10 @@ func (h *V1ServiceProtocolHandler) HandleMessage(payload string) error {
 
 			room, ok := h.cache.rooms.ByGatewayUID(*pMsg.Room)
 			if !ok {
-				return NewProtocolError(fmt.Sprintf("unknown room %d", *pMsg.Room))
+				return NewProtocolError(fmt.Sprintf("unknown room %s", *pMsg.Room))
 			}
 
-			if err := h.roomsStatisticsManager.OnAir(room.ID); err != nil {
+			if err := h.roomsStatisticsManager.OnAir(room.GatewayUID); err != nil {
 				return pkgerr.Wrap(err, "roomsStatisticsManager.OnAir")
 			}
 		}

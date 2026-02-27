@@ -1,6 +1,6 @@
--- Revert room_server_assignments to use internal rooms.id
+-- Revert room_server_assignments.room_id back to BIGINT with FK
 
-DROP TABLE IF EXISTS room_server_assignments;
+DROP TABLE IF EXISTS room_server_assignments CASCADE;
 
 CREATE TABLE IF NOT EXISTS room_server_assignments
 (

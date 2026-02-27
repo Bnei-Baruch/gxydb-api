@@ -64,7 +64,7 @@ func janusConfigFn(cmd *cobra.Command, args []string) {
 	log.Info().Msgf("got %d rooms from DB", len(rooms))
 	for _, room := range rooms {
 		_, err := fmt.Fprintf(videoroomFile,
-			`room-%d : 
+			`room-%s : 
 {
   description = "%s";
   bitrate = "64000";
@@ -90,7 +90,7 @@ func janusConfigFn(cmd *cobra.Command, args []string) {
 		}
 
 		_, err = fmt.Fprintf(textroomFile,
-			`room-%d : 
+			`room-%s : 
 {
   description = "%s";
   secret = "%s";

@@ -77,7 +77,7 @@ func (s *ApiTestSuite) TestListGroups() {
 		roomPerGateway: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
 		gateways[gateway.ID] = gateway
@@ -118,8 +118,8 @@ func (s *ApiTestSuite) TestListGroupsWithNumUsers() {
 		roomPerGateway: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
-	roomNumUsers := make(map[int]int)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
+	roomNumUsers := make(map[string]int)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
 		gateways[gateway.ID] = gateway
@@ -339,7 +339,7 @@ func (s *ApiTestSuite) TestListRooms() {
 		sessionsPerRoom: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	sessions := make(map[string]*models.Session, counts.gateways*counts.roomPerGateway*counts.sessionsPerRoom)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
@@ -605,7 +605,7 @@ func (s *ApiTestSuite) TestListUsers() {
 		sessionsPerRoom: 5,
 	}
 	gateways := make(map[int64]*models.Gateway, counts.gateways)
-	rooms := make(map[int]*models.Room, counts.gateways*counts.roomPerGateway)
+	rooms := make(map[string]*models.Room, counts.gateways*counts.roomPerGateway)
 	sessions := make(map[string]*models.Session, counts.gateways*counts.roomPerGateway*counts.sessionsPerRoom)
 	for i := 0; i < counts.gateways; i++ {
 		gateway := s.CreateGateway()
@@ -1818,7 +1818,7 @@ func (s *ApiTestSuite) TestV2GetRoomsStatistics() {
 	for i := range rooms {
 		rooms[i] = s.CreateRoom(gateway)
 		roomStatistic := models.RoomStatistic{
-			RoomID: rooms[i].ID,
+			RoomID: fmt.Sprintf("%d", rooms[i].ID),
 			OnAir:  i + 1,
 		}
 		err := roomStatistic.Insert(s.DB, boil.Infer())
@@ -1921,7 +1921,7 @@ func (s *ApiTestSuite) assertV1Session(session *models.Session, actual map[strin
 	s.Equal(session.CreatedAt.Unix(), int64(actual["timestamp"].(float64)), "timestamp")
 	s.Equal(session.GatewaySession.Int64, int64(actual["session"].(float64)), "session")
 	s.Equal(session.GatewayHandle.Int64, int64(actual["handle"].(float64)), "handle")
-	s.Equal(session.GatewayFeed.Int64, int64(actual["rfid"].(float64)), "rfid")
+	s.Equal(session.GatewayFeed.String, actual["rfid"].(string), "rfid")
 	s.Equal(session.Camera, actual["camera"], "camera")
 	s.Equal(session.Question, actual["question"], "question")
 	s.Equal(session.SelfTest, actual["self_test"], "self_test")
@@ -1941,7 +1941,7 @@ func (s *ApiTestSuite) assertV1User(v1User *V1User, body map[string]interface{})
 	s.InEpsilon(v1User.Timestamp, int64(body["timestamp"].(float64)), 1, "timestamp")
 	s.Equal(v1User.Session, int64(body["session"].(float64)), "session")
 	s.Equal(v1User.Handle, int64(body["handle"].(float64)), "handle")
-	s.Equal(v1User.RFID, int64(body["rfid"].(float64)), "rfid")
+	s.Equal(v1User.RFID, body["rfid"].(string), "rfid")
 	s.Equal(v1User.TextroomHandle, int64(body["textroom_handle"].(float64)), "textroom_handle")
 	s.Equal(v1User.Camera, body["camera"], "camera")
 	s.Equal(v1User.Question, body["question"], "question")
@@ -1964,7 +1964,7 @@ func (s *ApiTestSuite) makeV1user(gateway *models.Gateway, room *models.Room, us
 		Timestamp:      time.Now().Unix(),
 		Session:        rand.Int63n(math.MaxInt32),
 		Handle:         rand.Int63n(math.MaxInt32),
-		RFID:           rand.Int63n(math.MaxInt32),
+		RFID:           fmt.Sprintf("%d", rand.Int63n(math.MaxInt32)),
 		TextroomHandle: rand.Int63n(math.MaxInt32),
 		Camera:         false,
 		Question:       false,

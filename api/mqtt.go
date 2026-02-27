@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -184,20 +183,14 @@ func (l *MQTTListener) Close() {
 }
 
 func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
-	log.Info().
-		Str("topic", m.Topic()).
-		Int("payload_size", len(m.Payload())).
-		Msg("MQTT service protocol message")
-	
-	// Full payload in debug mode
 	log.Debug().
-		Str("topic", m.Topic()).
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
-		Bool("duplicate", m.Duplicate()).
-		Int8("qos", int8(m.Qos())).
-		Bool("retained", m.Retained()).
-		Uint16("message_id", m.MessageID()).
-		Msg("MQTT service protocol details")
+		Msg("MQTT handle service protocol")
 
 	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
 	go func() {
@@ -208,20 +201,14 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
-	log.Info().
-		Str("topic", m.Topic()).
-		Int("payload_size", len(m.Payload())).
-		Msg("MQTT event message")
-	
-	// Full payload in debug mode
 	log.Debug().
-		Str("topic", m.Topic()).
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
-		Bool("duplicate", m.Duplicate()).
-		Int8("qos", int8(m.Qos())).
-		Bool("retained", m.Retained()).
-		Uint16("message_id", m.MessageID()).
-		Msg("MQTT event details")
+		Msg("MQTT handle event")
 
 	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
@@ -238,31 +225,24 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 }
 
 func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
-	log.Info().
-		Str("topic", m.Topic()).
-		Int("payload_size", len(m.Payload())).
-		Msg("MQTT update session")
-	
-	// Full payload in debug mode
 	log.Debug().
-		Str("topic", m.Topic()).
+		Bool("Duplicate", m.Duplicate()).
+		Int8("QOS", int8(m.Qos())).
+		Bool("Retained", m.Retained()).
+		Str("Topic", m.Topic()).
+		Uint16("MessageID", m.MessageID()).
 		Bytes("payload", m.Payload()).
-		Bool("duplicate", m.Duplicate()).
-		Int8("qos", int8(m.Qos())).
-		Bool("retained", m.Retained()).
-		Uint16("message_id", m.MessageID()).
-		Msg("MQTT update session details")
-	
+		Msg("MQTT update user session")
 	var user *V1User
 	if err := json.Unmarshal(m.Payload(), &user); err != nil {
-		log.Error().Err(err).Msg("json.Unmarshal")
+		log.Error().Err(err).Bytes("payload", m.Payload()).Msg("json.Unmarshal")
 		return
 	}
 	ctx := context.Background()
 
 	go func() {
 		if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
-			log.Error().Err(err).Msg("update session error")
+			log.Error().Err(err).Str("user_id", user.ID).Str("email", user.Email).Str("room", user.Room).Msg("update session error")
 		}
 	}()
 }
@@ -346,11 +326,13 @@ func (l *MQTTListener) HandleGatewayStatus(c mqtt.Client, m mqtt.Message) {
 			return
 		}
 
-		// Check if this is a Janus gateway (gxy*)
 		serverName := parts[1]
-		matched, _ := regexp.MatchString(`gxy\d+`, serverName)
-		if !matched {
-			log.Debug().Str("server", serverName).Msg("HandleGatewayStatus: ignoring non-gateway server")
+
+		// Only process servers we're tracking
+		l.gatewayStatusesMu.RLock()
+		_, tracked := l.gatewayStatuses[serverName]
+		l.gatewayStatusesMu.RUnlock()
+		if !tracked {
 			return
 		}
 
@@ -624,6 +606,19 @@ func (l *MQTTListener) triggerFailover(ctx context.Context, failedServer string)
 		Msg("Failover completed successfully")
 }
 
+// IsGatewayOnline implements domain.GatewayStatusChecker
+func (l *MQTTListener) IsGatewayOnline(serverName string) bool {
+	l.gatewayStatusesMu.RLock()
+	defer l.gatewayStatusesMu.RUnlock()
+
+	if status, ok := l.gatewayStatuses[serverName]; ok {
+		status.mu.RLock()
+		defer status.mu.RUnlock()
+		return status.Online
+	}
+	return false
+}
+
 // getAlivePrimaryServers returns list of alive primary servers
 func (l *MQTTListener) getAlivePrimaryServers() []string {
 	l.gatewayStatusesMu.RLock()
@@ -684,22 +679,6 @@ func (l *MQTTListener) GetGatewayStatuses() map[string]*common.GatewayStatusInfo
 	}
 
 	return result
-}
-
-// IsGatewayOnline implements GatewayStatusChecker interface
-// Returns true if gateway is online, false if offline or unknown
-func (l *MQTTListener) IsGatewayOnline(serverName string) bool {
-	l.gatewayStatusesMu.RLock()
-	defer l.gatewayStatusesMu.RUnlock()
-	
-	if status, ok := l.gatewayStatuses[serverName]; ok {
-		status.mu.RLock()
-		defer status.mu.RUnlock()
-		return status.Online
-	}
-	
-	// Unknown server - assume offline
-	return false
 }
 
 type PahoLogAdapter struct {

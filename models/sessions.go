@@ -25,11 +25,11 @@ import (
 type Session struct {
 	ID                    int64       `boil:"id" json:"id" toml:"id" yaml:"id"`
 	UserID                int64       `boil:"user_id" json:"user_id" toml:"user_id" yaml:"user_id"`
-	RoomID                null.Int64  `boil:"room_id" json:"room_id,omitempty" toml:"room_id" yaml:"room_id,omitempty"`
+	RoomID                null.String `boil:"room_id" json:"room_id,omitempty" toml:"room_id" yaml:"room_id,omitempty"`
 	GatewayID             null.Int64  `boil:"gateway_id" json:"gateway_id,omitempty" toml:"gateway_id" yaml:"gateway_id,omitempty"`
 	GatewaySession        null.Int64  `boil:"gateway_session" json:"gateway_session,omitempty" toml:"gateway_session" yaml:"gateway_session,omitempty"`
 	GatewayHandle         null.Int64  `boil:"gateway_handle" json:"gateway_handle,omitempty" toml:"gateway_handle" yaml:"gateway_handle,omitempty"`
-	GatewayFeed           null.Int64  `boil:"gateway_feed" json:"gateway_feed,omitempty" toml:"gateway_feed" yaml:"gateway_feed,omitempty"`
+	GatewayFeed           null.String `boil:"gateway_feed" json:"gateway_feed,omitempty" toml:"gateway_feed" yaml:"gateway_feed,omitempty"`
 	Display               null.String `boil:"display" json:"display,omitempty" toml:"display" yaml:"display,omitempty"`
 	Camera                bool        `boil:"camera" json:"camera" toml:"camera" yaml:"camera"`
 	Question              bool        `boil:"question" json:"question" toml:"question" yaml:"question"`
@@ -179,11 +179,11 @@ func (w whereHelpernull_Int64) IsNotNull() qm.QueryMod { return qmhelper.WhereIs
 var SessionWhere = struct {
 	ID                    whereHelperint64
 	UserID                whereHelperint64
-	RoomID                whereHelpernull_Int64
+	RoomID                whereHelpernull_String
 	GatewayID             whereHelpernull_Int64
 	GatewaySession        whereHelpernull_Int64
 	GatewayHandle         whereHelpernull_Int64
-	GatewayFeed           whereHelpernull_Int64
+	GatewayFeed           whereHelpernull_String
 	Display               whereHelpernull_String
 	Camera                whereHelperbool
 	Question              whereHelperbool
@@ -200,11 +200,11 @@ var SessionWhere = struct {
 }{
 	ID:                    whereHelperint64{field: "\"sessions\".\"id\""},
 	UserID:                whereHelperint64{field: "\"sessions\".\"user_id\""},
-	RoomID:                whereHelpernull_Int64{field: "\"sessions\".\"room_id\""},
+	RoomID:                whereHelpernull_String{field: "\"sessions\".\"room_id\""},
 	GatewayID:             whereHelpernull_Int64{field: "\"sessions\".\"gateway_id\""},
 	GatewaySession:        whereHelpernull_Int64{field: "\"sessions\".\"gateway_session\""},
 	GatewayHandle:         whereHelpernull_Int64{field: "\"sessions\".\"gateway_handle\""},
-	GatewayFeed:           whereHelpernull_Int64{field: "\"sessions\".\"gateway_feed\""},
+	GatewayFeed:           whereHelpernull_String{field: "\"sessions\".\"gateway_feed\""},
 	Display:               whereHelpernull_String{field: "\"sessions\".\"display\""},
 	Camera:                whereHelperbool{field: "\"sessions\".\"camera\""},
 	Question:              whereHelperbool{field: "\"sessions\".\"question\""},
@@ -1368,7 +1368,7 @@ func (o SessionSlice) DeleteAll(exec boil.Executor) (int64, error) {
 
 	rowsAff, err := result.RowsAffected()
 	if err != nil {
-		return 0, errors.Wrap(err, "models: failed to get rows affected by deleteall for sessions")
+		return 0, errors.Wrap(err, "models: unable to retrieve rows affected by deleteall for sessions")
 	}
 
 	return rowsAff, nil

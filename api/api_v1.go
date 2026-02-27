@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sort"
-	"strconv"
 
 	"github.com/edoshor/janus-go"
 	"github.com/gorilla/mux"
@@ -28,7 +27,7 @@ import (
 func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 
-	roomCounts := make(map[int64]int)
+	roomCounts := make(map[string]int64)
 	if withNumUsers := params.Get("with_num_users"); withNumUsers == "true" {
 		// fetch num_users for each room from sessions table.
 		// we distinct by user_id as we do in every other place (makeV1Room)
@@ -42,10 +41,11 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 			return
 		}
+		defer rows.Close()
 
 		for rows.Next() {
-			var roomID int64
-			var numUsers int
+			var roomID string
+			var numUsers int64
 			if err := rows.Scan(&roomID, &numUsers); err != nil {
 				httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
 				return
@@ -59,25 +59,51 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Get room server assignments if SCALE mode is enabled
+	roomAssignments := make(map[string]string) // roomID -> gatewayName
+	if a.roomServerAssignmentManager != nil && common.Config.ScaleMode {
+		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
+		if err != nil {
+			log.Ctx(r.Context()).Error().Err(err).Msg("Failed to fetch room assignments")
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				var roomID, gatewayName string
+				if err := rows.Scan(&roomID, &gatewayName); err == nil {
+					roomAssignments[roomID] = gatewayName
+				}
+			}
+		}
+	}
+
 	// get rooms from cache
 	rooms := a.cache.rooms.Values()
 	roomInfos := make([]*V1Room, len(rooms))
 	for i := range rooms {
 		room := rooms[i]
 
-		gateway, ok := a.cache.gateways.ByID(room.DefaultGatewayID)
-		if !ok {
-			log.Ctx(r.Context()).Error().Msgf("gateways cache miss %d [room %d]", room.DefaultGatewayID, room.ID)
-			continue
+		// Determine which gateway to use
+		var gatewayName string
+		if assignedGateway, ok := roomAssignments[room.GatewayUID]; ok {
+			// Use assigned gateway from room_server_assignments
+			gatewayName = assignedGateway
+		} else {
+			// Fallback to default gateway
+			gateway, ok := a.cache.gateways.ByID(room.DefaultGatewayID)
+			if !ok {
+				log.Ctx(r.Context()).Error().Msgf("gateways cache miss %d [room %d]", room.DefaultGatewayID, room.ID)
+				continue
+			}
+			gatewayName = gateway.Name
 		}
 
 		roomInfos[i] = &V1Room{
 			V1RoomInfo: V1RoomInfo{
 				Room:        room.GatewayUID,
-				Janus:       gateway.Name,
+				Janus:       gatewayName,
 				Description: room.Name,
 			},
-			NumUsers: roomCounts[room.ID],
+			NumUsers: int(roomCounts[room.GatewayUID]),
 		}
 	}
 
@@ -95,11 +121,7 @@ func (a *App) V1CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	var data V1RoomInfo
 	if err := httputil.DecodeJSONBody(w, r, &data); err != nil {
@@ -120,7 +142,7 @@ func (a *App) V1CreateGroup(w http.ResponseWriter, r *http.Request) {
 		GatewayUID:       id,
 	}
 
-	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		if err := room.Upsert(tx, true, []string{models.RoomColumns.GatewayUID}, boil.Infer(), boil.Infer()); err != nil {
 			return pkgerr.WithStack(err)
 		}
@@ -152,13 +174,13 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load dynamic assignments from room_server_assignments (Scale Mode)
-	assignments := make(map[int64]string) // room_id -> gateway_name
+	assignments := make(map[string]string) // room_id -> gateway_name
 	if common.Config.ScaleMode {
 		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
-				var roomID int64
+				var roomID string
 				var gatewayName string
 				if err := rows.Scan(&roomID, &gatewayName); err == nil {
 					assignments[roomID] = gatewayName
@@ -177,7 +199,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 
 		// Use dynamic assignment if exists, otherwise use default gateway
 		var gateway *models.Gateway
-		if gatewayName, ok := assignments[room.ID]; ok {
+		if gatewayName, ok := assignments[room.GatewayUID]; ok {
 			gateway, _ = a.cache.gateways.ByName(gatewayName)
 		}
 
@@ -193,11 +215,7 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	cachedRoom, ok := a.cache.rooms.ByGatewayUID(id)
 	if !ok {
@@ -227,7 +245,7 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 	var gateway *models.Gateway
 	if common.Config.ScaleMode {
 		var gatewayName string
-		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.ID).Scan(&gatewayName)
+		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.GatewayUID).Scan(&gatewayName)
 		if err == nil {
 			gateway, _ = a.cache.gateways.ByName(gatewayName)
 		}
@@ -244,11 +262,7 @@ func (a *App) V1UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	id, err := strconv.Atoi(vars["id"])
-	if err != nil {
-		httputil.NewBadRequestError(err, "malformed id").Abort(w, r)
-		return
-	}
+	id := vars["id"]
 
 	room, ok := a.cache.rooms.ByGatewayUID(id)
 	if !ok {
@@ -270,7 +284,7 @@ func (a *App) V1UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
 		if _, err := room.Update(tx, boil.Whitelist(models.RoomColumns.Extra)); err != nil {
 			return pkgerr.WithStack(err)
 		}
@@ -491,11 +505,11 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 			}
 			room, ok := a.cache.rooms.ByGatewayUID(item.Room)
 			if !ok {
-				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %d", item.Room))
+				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %s", item.Room))
 			}
 
 			cRooms[i] = &models.CompositesRoom{
-				RoomID:    room.ID,
+				RoomID:    room.GatewayUID,
 				GatewayID: gateway.ID,
 				Position:  i + 1,
 			}
@@ -624,7 +638,7 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
 		Handle:         session.GatewayHandle.Int64,
-		RFID:           session.GatewayFeed.Int64,
+		RFID:           session.GatewayFeed.String,
 		TextroomHandle: session.GatewayHandleTextroom.Int64,
 		Camera:         session.Camera,
 		Question:       session.Question,

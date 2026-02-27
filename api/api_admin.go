@@ -247,17 +247,14 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if data.GatewayUID == 0 {
-		var maxUID int
-		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid), 0) + 1"), qm.From(models.TableNames.Rooms)).
+	if data.GatewayUID == "" || data.GatewayUID == "0" {
+		var maxUID string
+		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid::int), 0) + 1"), qm.From(models.TableNames.Rooms)).
 			QueryRow(a.DB).Scan(&maxUID); err != nil {
 			httputil.NewInternalError(pkgerr.Wrap(err, "fetch max gateway_uid")).Abort(w, r)
 			return
 		}
 		data.GatewayUID = maxUID
-	} else if data.GatewayUID < 0 {
-		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
-		return
 	} else if _, ok := a.cache.rooms.ByGatewayUID(data.GatewayUID); ok {
 		httputil.NewBadRequestError(nil, "room already exists [gateway_uid]").Abort(w, r)
 		return
@@ -270,8 +267,9 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// create room in gateways
+		gatewayUID, _ := strconv.Atoi(data.GatewayUID) // Convert string to int for Janus API
 		room := &janus_plugins.VideoroomRoom{
-			Room:               data.GatewayUID,
+			Room:               gatewayUID,
 			Description:        data.Name,
 			Secret:             common.Config.GatewayRoomsSecret,
 			Publishers:         100,
@@ -382,8 +380,8 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	a.requestContext(r).Params = data
 
-	if data.GatewayUID <= 0 {
-		httputil.NewBadRequestError(nil, "gateway_uid must be a positive integer").Abort(w, r)
+	if data.GatewayUID == "" || data.GatewayUID == "0" {
+		httputil.NewBadRequestError(nil, "gateway_uid must be a positive value").Abort(w, r)
 		return
 	}
 
@@ -426,8 +424,9 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// update room in gateways
+		gatewayUID, _ := strconv.Atoi(data.GatewayUID) // Convert string to int for Janus API
 		room := &janus_plugins.VideoroomRoomForEdit{
-			Room:        data.GatewayUID,
+			Room:        gatewayUID,
 			Description: data.Name,
 			Publishers:  100,   // same as create
 			Bitrate:     64000, // same as create
@@ -500,8 +499,9 @@ func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 			return httputil.NewInternalError(pkgerr.WithStack(err))
 		}
 
+		gatewayUID, _ := strconv.Atoi(room.GatewayUID) // Convert string to int for Janus API
 		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayPluginAdminKey).
-			DestroyRequest(room.GatewayUID, true, common.Config.GatewayRoomsSecret)
+			DestroyRequest(gatewayUID, true, common.Config.GatewayRoomsSecret)
 
 		for _, gateway := range a.cache.gateways.Values() {
 			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {

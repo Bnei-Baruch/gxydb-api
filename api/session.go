@@ -168,7 +168,7 @@ func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, 
 
 func (sm *V1SessionManager) onProtocolEnter(ctx context.Context, tx *sql.Tx, pMsg *V1ProtocolMessageText) error {
 	logger := log.Ctx(ctx)
-	logger.Info().Msgf("%s has enter room %d", pMsg.User.ID, pMsg.User.Room)
+	logger.Info().Msgf("%s has enter room %s", pMsg.User.ID, pMsg.User.Room)
 
 	userID, err := sm.getInternalUserID(ctx, tx, &pMsg.User)
 	if err != nil {
@@ -260,7 +260,7 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 
 	// Get room_id before closing session to check for assignment cleanup
-	var roomID null.Int64
+	var roomID null.String
 	err = queries.Raw("SELECT room_id FROM sessions WHERE user_id = $1 AND removed_at IS NULL LIMIT 1", userID).
 		QueryRow(tx).Scan(&roomID)
 	if err != nil && err != sql.ErrNoRows {
@@ -280,8 +280,27 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
 
-	// Note: Room assignments cleanup is handled by PeriodicSessionCleaner.cleanRoomAssignments()
-	// This prevents race conditions during user reconnections.
+	if roomID.Valid {
+		var liveSessions int
+		err = queries.Raw(
+			"SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL",
+			roomID.String,
+		).QueryRow(tx).Scan(&liveSessions)
+		if err != nil {
+			log.Ctx(ctx).Error().Err(err).Msg("Failed to count live sessions for room")
+		} else if liveSessions == 0 {
+			_, err = queries.Raw(
+				"DELETE FROM room_server_assignments WHERE room_id = $1",
+				roomID.String,
+			).Exec(tx)
+			if err != nil {
+				log.Ctx(ctx).Error().Err(err).Msg("Failed to delete room assignment")
+			} else {
+				log.Ctx(ctx).Info().Str("room_id", roomID.String).
+					Msg("Deleted room assignment - no live sessions remaining")
+			}
+		}
+	}
 
 	return nil
 }
@@ -306,7 +325,7 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 
 	// Update last_used_at for room server assignment
 	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
-		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.Int64); err != nil {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.String); err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
 		}
 	}
@@ -334,7 +353,7 @@ func WrappingProtocolError(err error, msg string) *ProtocolError {
 func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Session, error) {
 	room, ok := sm.cache.rooms.ByGatewayUID(user.Room)
 	if !ok {
-		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %d", user.Room))
+		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %s", user.Room))
 	}
 
 	gateway, ok := sm.cache.gateways.ByName(user.Janus)
@@ -344,11 +363,11 @@ func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Ses
 
 	s := models.Session{
 		UserID:                userID,
-		RoomID:                null.Int64From(room.ID),
+		RoomID:                null.StringFrom(room.GatewayUID),
 		GatewayID:             null.Int64From(gateway.ID),
 		GatewaySession:        null.Int64From(user.Session),
 		GatewayHandle:         null.Int64From(user.Handle),
-		GatewayFeed:           null.Int64From(user.RFID),
+		GatewayFeed:           null.StringFrom(user.RFID),
 		GatewayHandleTextroom: null.Int64From(user.TextroomHandle),
 		Display:               null.StringFrom(user.Display),
 		Camera:                user.Camera,
@@ -402,7 +421,6 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
-		psc.cleanRoomAssignments()
 	}
 }
 
@@ -422,39 +440,41 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 	log.Info().Msgf("PeriodicSessionCleaner found %d sessions to be cleaned", len(sessions))
 
-	if len(sessions) == 0 {
-		return
-	}
-
-	// clean
-	b, err := json.Marshal(map[string]interface{}{
-		"clean_session": time.Now().UTC(),
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("PeriodicSessionCleaner json.Marshal")
-	}
 	err = sqlutil.InTx(context.TODO(), psc.db, func(tx *sql.Tx) error {
-		ids := make([]int64, len(sessions))
-		for i := range sessions {
-			ids[i] = sessions[i].ID
-		}
-		res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where id = ANY($3)",
-			string(b), time.Now().UTC(), pq.Array(ids),
-		).Exec(tx)
-		if err != nil {
-			return pkgerr.WithStack(err)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return pkgerr.WithStack(err)
+		if len(sessions) > 0 {
+			b, err := json.Marshal(map[string]interface{}{
+				"clean_session": time.Now().UTC(),
+			})
+			if err != nil {
+				log.Error().Err(err).Msg("PeriodicSessionCleaner json.Marshal")
+			}
+			ids := make([]int64, len(sessions))
+			for i := range sessions {
+				ids[i] = sessions[i].ID
+			}
+			res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where id = ANY($3)",
+				string(b), time.Now().UTC(), pq.Array(ids),
+			).Exec(tx)
+			if err != nil {
+				return pkgerr.WithStack(err)
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return pkgerr.WithStack(err)
+			}
+
+			if int(affected) != len(sessions) {
+				log.Warn().
+					Int("sessions", len(sessions)).
+					Int64("affected", affected).
+					Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
+			}
 		}
 
-		if int(affected) != len(sessions) {
-			log.Warn().
-				Int("sessions", len(sessions)).
-				Int64("affected", affected).
-				Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
-			return nil
+		if psc.roomServerAssignmentManager != nil {
+			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(context.TODO()); err != nil {
+				return pkgerr.Wrap(err, "clean inactive assignments")
+			}
 		}
 
 		return nil
@@ -504,13 +524,4 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 }
 
-func (psc *PeriodicSessionCleaner) cleanRoomAssignments() {
-	if psc.roomServerAssignmentManager == nil {
-		return
-	}
 
-	ctx := context.TODO()
-	if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
-		log.Error().Err(err).Msg("PeriodicSessionCleaner clean room assignments")
-	}
-}
