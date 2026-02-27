@@ -402,7 +402,6 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
-		psc.cleanRoomAssignments()
 	}
 }
 
@@ -454,7 +453,23 @@ func (psc *PeriodicSessionCleaner) clean() {
 				Int("sessions", len(sessions)).
 				Int64("affected", affected).
 				Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
-			return nil
+		}
+
+		if psc.roomServerAssignmentManager != nil {
+			assignRes, err := queries.Raw(`
+				DELETE FROM room_server_assignments
+				WHERE room_id NOT IN (
+					SELECT DISTINCT room_id FROM sessions
+					WHERE removed_at IS NULL AND room_id IS NOT NULL
+				)
+			`).Exec(tx)
+			if err != nil {
+				return pkgerr.Wrap(err, "clean room assignments")
+			}
+			if assignAffected, err := assignRes.RowsAffected(); err == nil && assignAffected > 0 {
+				log.Info().Int64("cleaned_assignments", assignAffected).
+					Msg("PeriodicSessionCleaner cleaned room assignments")
+			}
 		}
 
 		return nil
@@ -504,13 +519,3 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 }
 
-func (psc *PeriodicSessionCleaner) cleanRoomAssignments() {
-	if psc.roomServerAssignmentManager == nil {
-		return
-	}
-
-	ctx := context.TODO()
-	if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
-		log.Error().Err(err).Msg("PeriodicSessionCleaner clean room assignments")
-	}
-}
