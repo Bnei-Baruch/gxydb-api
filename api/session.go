@@ -421,7 +421,6 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
-		psc.cleanOrphanedAssignments()
 	}
 }
 
@@ -441,38 +440,41 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 	log.Info().Msgf("PeriodicSessionCleaner found %d sessions to be cleaned", len(sessions))
 
-	if len(sessions) == 0 {
-		return
-	}
-
-	// clean
-	b, err := json.Marshal(map[string]interface{}{
-		"clean_session": time.Now().UTC(),
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("PeriodicSessionCleaner json.Marshal")
-	}
 	err = sqlutil.InTx(context.TODO(), psc.db, func(tx *sql.Tx) error {
-		ids := make([]int64, len(sessions))
-		for i := range sessions {
-			ids[i] = sessions[i].ID
-		}
-		res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where id = ANY($3)",
-			string(b), time.Now().UTC(), pq.Array(ids),
-		).Exec(tx)
-		if err != nil {
-			return pkgerr.WithStack(err)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return pkgerr.WithStack(err)
+		if len(sessions) > 0 {
+			b, err := json.Marshal(map[string]interface{}{
+				"clean_session": time.Now().UTC(),
+			})
+			if err != nil {
+				log.Error().Err(err).Msg("PeriodicSessionCleaner json.Marshal")
+			}
+			ids := make([]int64, len(sessions))
+			for i := range sessions {
+				ids[i] = sessions[i].ID
+			}
+			res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where id = ANY($3)",
+				string(b), time.Now().UTC(), pq.Array(ids),
+			).Exec(tx)
+			if err != nil {
+				return pkgerr.WithStack(err)
+			}
+			affected, err := res.RowsAffected()
+			if err != nil {
+				return pkgerr.WithStack(err)
+			}
+
+			if int(affected) != len(sessions) {
+				log.Warn().
+					Int("sessions", len(sessions)).
+					Int64("affected", affected).
+					Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
+			}
 		}
 
-		if int(affected) != len(sessions) {
-			log.Warn().
-				Int("sessions", len(sessions)).
-				Int64("affected", affected).
-				Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
+		if psc.roomServerAssignmentManager != nil {
+			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(context.TODO()); err != nil {
+				return pkgerr.Wrap(err, "clean inactive assignments")
+			}
 		}
 
 		return nil
@@ -522,25 +524,4 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 }
 
-func (psc *PeriodicSessionCleaner) cleanOrphanedAssignments() {
-	if psc.roomServerAssignmentManager == nil {
-		return
-	}
-
-	res, err := queries.Raw(`
-		DELETE FROM room_server_assignments
-		WHERE room_id NOT IN (
-			SELECT DISTINCT room_id FROM sessions
-			WHERE removed_at IS NULL AND room_id IS NOT NULL
-		)
-	`).Exec(psc.db)
-	if err != nil {
-		log.Error().Err(err).Msg("PeriodicSessionCleaner clean orphaned assignments")
-		return
-	}
-	if affected, err := res.RowsAffected(); err == nil && affected > 0 {
-		log.Info().Int64("cleaned_assignments", affected).
-			Msg("PeriodicSessionCleaner cleaned orphaned room assignments")
-	}
-}
 
