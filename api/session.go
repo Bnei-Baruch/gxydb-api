@@ -280,8 +280,27 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
 
-	// Note: Room assignments cleanup is handled by PeriodicSessionCleaner.cleanRoomAssignments()
-	// This prevents race conditions during user reconnections.
+	if roomID.Valid {
+		var liveSessions int
+		err = queries.Raw(
+			"SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL",
+			roomID.String,
+		).QueryRow(tx).Scan(&liveSessions)
+		if err != nil {
+			log.Ctx(ctx).Error().Err(err).Msg("Failed to count live sessions for room")
+		} else if liveSessions == 0 {
+			_, err = queries.Raw(
+				"DELETE FROM room_server_assignments WHERE room_id = $1",
+				roomID.String,
+			).Exec(tx)
+			if err != nil {
+				log.Ctx(ctx).Error().Err(err).Msg("Failed to delete room assignment")
+			} else {
+				log.Ctx(ctx).Info().Str("room_id", roomID.String).
+					Msg("Deleted room assignment - no live sessions remaining")
+			}
+		}
+	}
 
 	return nil
 }
@@ -402,6 +421,7 @@ func (psc *PeriodicSessionCleaner) Close() {
 func (psc *PeriodicSessionCleaner) run() {
 	for range psc.ticker.C {
 		psc.clean()
+		psc.cleanOrphanedAssignments()
 	}
 }
 
@@ -455,23 +475,6 @@ func (psc *PeriodicSessionCleaner) clean() {
 				Msg("PeriodicSessionCleaner clean sessions rows affected mismatch")
 		}
 
-		if psc.roomServerAssignmentManager != nil {
-			assignRes, err := queries.Raw(`
-				DELETE FROM room_server_assignments
-				WHERE room_id NOT IN (
-					SELECT DISTINCT room_id FROM sessions
-					WHERE removed_at IS NULL AND room_id IS NOT NULL
-				)
-			`).Exec(tx)
-			if err != nil {
-				return pkgerr.Wrap(err, "clean room assignments")
-			}
-			if assignAffected, err := assignRes.RowsAffected(); err == nil && assignAffected > 0 {
-				log.Info().Int64("cleaned_assignments", assignAffected).
-					Msg("PeriodicSessionCleaner cleaned room assignments")
-			}
-		}
-
 		return nil
 	})
 
@@ -516,6 +519,28 @@ func (psc *PeriodicSessionCleaner) clean() {
 			Int64("gateway", s.GatewayID.Int64).
 			Str("properties", string(s.Properties.JSON)).
 			Msg("PeriodicSessionCleaner revived")
+	}
+}
+
+func (psc *PeriodicSessionCleaner) cleanOrphanedAssignments() {
+	if psc.roomServerAssignmentManager == nil {
+		return
+	}
+
+	res, err := queries.Raw(`
+		DELETE FROM room_server_assignments
+		WHERE room_id NOT IN (
+			SELECT DISTINCT room_id FROM sessions
+			WHERE removed_at IS NULL AND room_id IS NOT NULL
+		)
+	`).Exec(psc.db)
+	if err != nil {
+		log.Error().Err(err).Msg("PeriodicSessionCleaner clean orphaned assignments")
+		return
+	}
+	if affected, err := res.RowsAffected(); err == nil && affected > 0 {
+		log.Info().Int64("cleaned_assignments", affected).
+			Msg("PeriodicSessionCleaner cleaned orphaned room assignments")
 	}
 }
 
