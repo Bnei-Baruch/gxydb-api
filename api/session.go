@@ -259,14 +259,6 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 		log.Ctx(ctx).Error().Err(err).Msg("SessionManager.closeSession json.Marshal")
 	}
 
-	// Get room_id before closing session to check for assignment cleanup
-	var roomID null.String
-	err = queries.Raw("SELECT room_id FROM sessions WHERE user_id = $1 AND removed_at IS NULL LIMIT 1", userID).
-		QueryRow(tx).Scan(&roomID)
-	if err != nil && err != sql.ErrNoRows {
-		log.Ctx(ctx).Error().Err(err).Msg("Failed to get room_id before closing session")
-	}
-
 	res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where user_id = $3 and removed_at is null",
 		string(b), time.Now().UTC(), userID,
 	).Exec(tx)
@@ -279,28 +271,6 @@ func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID
 		return pkgerr.Wrap(err, "db update session")
 	}
 	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
-
-	if roomID.Valid {
-		var liveSessions int
-		err = queries.Raw(
-			"SELECT COUNT(*) FROM sessions WHERE room_id = $1 AND removed_at IS NULL",
-			roomID.String,
-		).QueryRow(tx).Scan(&liveSessions)
-		if err != nil {
-			log.Ctx(ctx).Error().Err(err).Msg("Failed to count live sessions for room")
-		} else if liveSessions == 0 {
-			_, err = queries.Raw(
-				"DELETE FROM room_server_assignments WHERE room_id = $1",
-				roomID.String,
-			).Exec(tx)
-			if err != nil {
-				log.Ctx(ctx).Error().Err(err).Msg("Failed to delete room assignment")
-			} else {
-				log.Ctx(ctx).Info().Str("room_id", roomID.String).
-					Msg("Deleted room assignment - no live sessions remaining")
-			}
-		}
-	}
 
 	return nil
 }
