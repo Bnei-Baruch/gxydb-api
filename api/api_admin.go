@@ -285,13 +285,14 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 				"permanent":            true,
 			}
 
-			for _, gateway := range a.cache.gateways.Values() {
-				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+			for _, server := range common.Config.AvailableJanusServers {
+				if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
+					log.Debug().Str("gateway", server).Msg("skip offline gateway for create room")
 					continue
 				}
 
-				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
-					return pkgerr.Wrapf(err, "create room on gateway %s", gateway.Name)
+				if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+					log.Error().Err(err).Str("gateway", server).Msg("create room on gateway failed")
 				}
 			}
 		}
@@ -428,13 +429,14 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 				"permanent":   true,
 			}
 
-			for _, gateway := range a.cache.gateways.Values() {
-				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+			for _, server := range common.Config.AvailableJanusServers {
+				if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
+					log.Debug().Str("gateway", server).Msg("skip offline gateway for edit room")
 					continue
 				}
 
-				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
-					return pkgerr.Wrapf(err, "edit room on gateway %s", gateway.Name)
+				if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+					log.Error().Err(err).Str("gateway", server).Msg("edit room on gateway failed")
 				}
 			}
 		}
@@ -497,13 +499,14 @@ func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 				"permanent": true,
 			}
 
-			for _, gateway := range a.cache.gateways.Values() {
-				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+			for _, server := range common.Config.AvailableJanusServers {
+				if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
+					log.Debug().Str("gateway", server).Msg("skip offline gateway for destroy room")
 					continue
 				}
 
-				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
-					return pkgerr.Wrapf(err, "destroy room on gateway %s", gateway.Name)
+				if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+					log.Error().Err(err).Str("gateway", server).Msg("destroy room on gateway failed")
 				}
 			}
 		}

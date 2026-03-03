@@ -51,6 +51,7 @@ func (c *MQTTAdminClient) HandleResponse(_ mqtt.Client, m mqtt.Message) {
 	}
 
 	c.mu.Lock()
+	pendingCount := len(c.pending)
 	ch, ok := c.pending[base.Transaction]
 	if ok {
 		delete(c.pending, base.Transaction)
@@ -58,7 +59,17 @@ func (c *MQTTAdminClient) HandleResponse(_ mqtt.Client, m mqtt.Message) {
 	c.mu.Unlock()
 
 	if ok {
+		log.Debug().
+			Str("transaction", base.Transaction).
+			Str("topic", m.Topic()).
+			Msg("MQTTAdminClient: matched pending request")
 		ch <- json.RawMessage(m.Payload())
+	} else if base.Transaction != "transaction" {
+		log.Debug().
+			Str("transaction", base.Transaction).
+			Str("topic", m.Topic()).
+			Int("pending_count", pendingCount).
+			Msg("MQTTAdminClient: no pending request for transaction")
 	}
 }
 
@@ -84,6 +95,13 @@ func (c *MQTTAdminClient) sendRequest(server string, payload map[string]interfac
 	}
 
 	topic := fmt.Sprintf("janus/%s/to-janus-admin", server)
+
+	log.Debug().
+		Str("topic", topic).
+		Str("transaction", txID).
+		RawJSON("payload", b).
+		Msg("MQTTAdminClient: sending request")
+
 	if token := c.client.Publish(topic, 1, false, b); token.Wait() && token.Error() != nil {
 		return nil, fmt.Errorf("mqtt publish to %s: %w", topic, token.Error())
 	}
