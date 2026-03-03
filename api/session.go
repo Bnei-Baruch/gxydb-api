@@ -137,33 +137,33 @@ func (sm *V1SessionManager) Close() {
 }
 
 func (sm *V1SessionManager) onVideoroomLeaving(ctx context.Context, tx *sql.Tx, event *janus.PluginEvent, eventType string) error {
-	display, ok := event.Event.Data["display"].(string)
-	if !ok {
-		return nil // some service users don't set their display. ignore this event.
-	}
-
-	var v1User V1User
-	if err := json.Unmarshal([]byte(display), &v1User); err != nil {
-		return pkgerr.Wrap(err, "json.Unmarshal")
-	}
-
-	logger := log.Ctx(ctx)
-	logger.Info().Msgf("%s has left room %v [%s]", v1User.ID, event.Event.Data["room"], eventType)
-
-	userID, err := sm.getInternalUserID(ctx, tx, &v1User)
-	if err != nil {
-		// we ignore ProtocolError here so that we could close sessions for disabled users
-		var pErr *ProtocolError
-		if !errors.As(err, &pErr) {
-			return pkgerr.Wrap(err, "sm.getInternalUserID")
-		}
-	}
-
-	if userID == 0 {
+	feedID, ok := event.Event.Data["id"].(string)
+	if !ok || feedID == "" {
 		return nil
 	}
 
-	return sm.closeSession(ctx, tx, userID)
+	logger := log.Ctx(ctx)
+	logger.Info().Str("feed", feedID).Str("room", fmt.Sprintf("%v", event.Event.Data["room"])).Str("event", eventType).Msg("videoroom leaving")
+
+	b, err := json.Marshal(map[string]interface{}{
+		"close_session": time.Now().UTC(),
+	})
+	if err != nil {
+		logger.Error().Err(err).Msg("onVideoroomLeaving json.Marshal")
+	}
+
+	res, err := queries.Raw(
+		"UPDATE sessions SET properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 WHERE gateway_feed = $3 AND removed_at IS NULL",
+		string(b), time.Now().UTC(), feedID,
+	).Exec(tx)
+	if err != nil {
+		return pkgerr.Wrap(err, "close session by feed")
+	}
+
+	affected, _ := res.RowsAffected()
+	logger.Info().Int64("affected", affected).Str("feed", feedID).Msg("sessions closed by feed")
+
+	return nil
 }
 
 func (sm *V1SessionManager) onProtocolEnter(ctx context.Context, tx *sql.Tx, pMsg *V1ProtocolMessageText) error {
@@ -173,12 +173,6 @@ func (sm *V1SessionManager) onProtocolEnter(ctx context.Context, tx *sql.Tx, pMs
 	userID, err := sm.getInternalUserID(ctx, tx, &pMsg.User)
 	if err != nil {
 		return pkgerr.Wrap(err, "sm.getInternalUserID")
-	}
-	if userID > 0 {
-		// close existing sessions if any
-		if err := sm.closeSession(ctx, tx, userID); err != nil {
-			return pkgerr.Wrap(err, "sm.closeSession")
-		}
 	}
 
 	session, err := sm.makeSession(userID, &pMsg.User)
@@ -249,30 +243,6 @@ func (sm *V1SessionManager) getInternalUserID(ctx context.Context, tx *sql.Tx, u
 	sm.cache.users.Set(u)
 
 	return u.ID, nil
-}
-
-func (sm *V1SessionManager) closeSession(ctx context.Context, tx *sql.Tx, userID int64) error {
-	b, err := json.Marshal(map[string]interface{}{
-		"close_session": time.Now().UTC(),
-	})
-	if err != nil {
-		log.Ctx(ctx).Error().Err(err).Msg("SessionManager.closeSession json.Marshal")
-	}
-
-	res, err := queries.Raw("update sessions set properties = coalesce(properties, '{}'::jsonb) || $1, removed_at = $2 where user_id = $3 and removed_at is null",
-		string(b), time.Now().UTC(), userID,
-	).Exec(tx)
-	if err != nil {
-		return pkgerr.Wrap(err, "db update session")
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return pkgerr.Wrap(err, "db update session")
-	}
-	log.Ctx(ctx).Info().Msgf("%d sessions were closed", rowsAffected)
-
-	return nil
 }
 
 func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user *V1User) error {
