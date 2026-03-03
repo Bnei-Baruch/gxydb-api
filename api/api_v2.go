@@ -30,12 +30,10 @@ func (a *App) V2GetConfig(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		token, _ := a.cache.gatewayTokens.ByID(gateway.ID)
 		respGateway := &V2Gateway{
-			Name:  gateway.Name,
-			URL:   gateway.URL,
-			Type:  gateway.Type,
-			Token: token,
+			Name: gateway.Name,
+			URL:  gateway.URL,
+			Type: gateway.Type,
 		}
 
 		if cfg.Gateways[gateway.Type] == nil {

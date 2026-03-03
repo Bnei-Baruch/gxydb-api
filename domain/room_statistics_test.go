@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -29,7 +28,6 @@ func (s *RoomStatisticsTestSuite) SetupTest() {
 
 func (s *RoomStatisticsTestSuite) TearDownTest() {
 	s.DBCleaner.Clean(models.TableNames.Gateways)
-	//s.GatewayManager.DestroyGatewaySessions()
 }
 
 func (s *RoomStatisticsTestSuite) TestGetAll() {

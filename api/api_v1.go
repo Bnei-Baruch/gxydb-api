@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/edoshor/janus-go"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 	"github.com/gorilla/mux"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"

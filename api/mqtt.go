@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
-	"github.com/edoshor/janus-go"
-	"net/url"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	pkgerr "github.com/pkg/errors"
@@ -18,6 +17,7 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/instrumentation"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 )
 
 // GatewayStatus holds the status of a Janus gateway
@@ -47,13 +47,22 @@ type MQTTListener struct {
 	gatewayStatusesMu      sync.RWMutex
 	periodicTicker         *time.Ticker
 	adminSecret            string
-	
+	adminClient            *janus.MQTTAdminClient
+
 	// Failover state
 	failoverMappings      map[string]*FailoverMapping // failed server -> mapping
 	failoverMappingsMu    sync.RWMutex
 	availableFailovers    []string                    // List of available failover servers
 	availableFailoversMu  sync.RWMutex
 	roomServerAssignmentMgr *domain.RoomServerAssignmentManager
+}
+
+func (l *MQTTListener) Client() mqtt.Client {
+	return l.client
+}
+
+func (l *MQTTListener) SetAdminClient(ac *janus.MQTTAdminClient) {
+	l.adminClient = ac
 }
 
 func NewMQTTListener(cache *AppCache, sph ServiceProtocolHandler, sm SessionManager, adminSecret string, roomServerAssignmentMgr *domain.RoomServerAssignmentManager) *MQTTListener {
@@ -442,8 +451,12 @@ type JanusAdminResponse struct {
 
 // HandleGatewayAdminResponse processes admin responses from Janus gateways (janus/{server}/from-janus-admin)
 func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message) {
+	// Route to admin client first for request/response correlation
+	if l.adminClient != nil {
+		l.adminClient.HandleResponse(c, m)
+	}
+
 	go func() {
-		// Extract server name from topic: janus/{server}/from-janus-admin
 		parts := strings.Split(m.Topic(), "/")
 		if len(parts) < 2 {
 			log.Error().Str("topic", m.Topic()).Msg("HandleGatewayAdminResponse: invalid topic format")
@@ -460,7 +473,6 @@ func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message)
 		}
 
 		if response.Janus == "success" {
-			// Update sessions count
 			l.gatewayStatusesMu.RLock()
 			status, exists := l.gatewayStatuses[serverName]
 			l.gatewayStatusesMu.RUnlock()
@@ -468,7 +480,7 @@ func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message)
 			if exists {
 				status.mu.Lock()
 				status.Sessions = len(response.Sessions)
-				status.LastSeen = time.Now() // Update LastSeen on every admin response
+				status.LastSeen = time.Now()
 				status.mu.Unlock()
 
 				log.Debug().

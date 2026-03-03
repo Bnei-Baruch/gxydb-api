@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -17,6 +16,7 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/instrumentation"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 )
 
 type App struct {
@@ -26,11 +26,11 @@ type App struct {
 	cache                       *AppCache
 	sessionManager              SessionManager
 	serviceProtocolHandler      ServiceProtocolHandler
-	gatewayTokensManager        *domain.GatewayTokensManager
 	roomsStatisticsManager      *domain.RoomStatisticsManager
 	roomServerAssignmentManager *domain.RoomServerAssignmentManager
 	periodicStatsCollector      *instrumentation.PeriodicCollector
 	mqttListener                *MQTTListener
+	janusAdmin                  *janus.MQTTAdminClient
 }
 
 func (a *App) initOidc(issuerUrls []string) middleware.OIDCTokenVerifier {
@@ -70,7 +70,6 @@ func (a *App) InitializeWithDeps(db common.DBInterface, tokenVerifier middleware
 	a.initRoomsStatistics()
 	a.initRoomServerAssignments()
 	a.initSessionManagement()
-	//a.initGatewayTokensMonitoring()
 	a.initServiceProtocolHandler()
 	a.initMQTT()
 	a.initInstrumentation()
@@ -134,9 +133,6 @@ func (a *App) Run() {
 }
 
 func (a *App) Shutdown() {
-	if a.gatewayTokensManager != nil {
-		a.gatewayTokensManager.Close()
-	}
 	if a.periodicStatsCollector != nil {
 		a.periodicStatsCollector.Close()
 	}
@@ -147,19 +143,6 @@ func (a *App) Shutdown() {
 	a.cache.Close()
 	if err := a.DB.Close(); err != nil {
 		log.Error().Err(err).Msg("DB.close")
-	}
-}
-
-func (a *App) Notify(event interface{}) {
-	switch event.(type) {
-	case string:
-		log.Info().Msgf("processing %s", event)
-		switch event.(string) {
-		case common.EventGatewayTokensChanged:
-			if err := a.cache.gatewayTokens.Reload(a.DB); err != nil {
-				log.Error().Err(err).Msg("cache.gatewayTokens.Reload")
-			}
-		}
 	}
 }
 
@@ -241,14 +224,6 @@ func (a *App) initServiceProtocolHandler() {
 	a.serviceProtocolHandler = NewV1ServiceProtocolHandler(a.cache, a.roomsStatisticsManager)
 }
 
-func (a *App) initGatewayTokensMonitoring() {
-	if common.Config.MonitorGatewayTokens {
-		a.gatewayTokensManager = domain.NewGatewayTokensManager(a.DB, 3*24*time.Hour)
-		a.gatewayTokensManager.AddObserver(a)
-		a.gatewayTokensManager.Monitor()
-	}
-}
-
 func (a *App) initRoomsStatistics() {
 	a.roomsStatisticsManager = domain.NewRoomStatisticsManager(a.DB)
 }
@@ -277,9 +252,10 @@ func (a *App) initMQTT() {
 		if err := a.mqttListener.Start(); err != nil {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
 		}
-		
-		// Connect room server assignment manager to MQTT for online status checks
-		// This ensures offline servers are not assigned to new rooms
+
+		a.janusAdmin = janus.NewMQTTAdminClient(a.mqttListener.Client(), common.Config.GatewayPluginAdminKey)
+		a.mqttListener.SetAdminClient(a.janusAdmin)
+
 		if a.roomServerAssignmentManager != nil {
 			a.roomServerAssignmentManager.SetStatusChecker(a.mqttListener)
 			log.Info().Msg("Connected room assignment manager to MQTT status checker")

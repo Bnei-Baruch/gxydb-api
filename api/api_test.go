@@ -10,15 +10,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
-	"strconv"
 	"testing"
 	"time"
 	"unsafe"
 
 	"github.com/coreos/go-oidc"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/edoshor/janus-go"
-	janus_admin "github.com/edoshor/janus-go/admin"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/volatiletech/null/v8"
@@ -28,6 +25,7 @@ import (
 	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
 	"github.com/Bnei-Baruch/gxydb-api/models"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/stringutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/testutil/mocks"
@@ -55,7 +53,6 @@ func (s *ApiTestSuite) SetupSuite() {
 
 func (s *ApiTestSuite) TearDownSuite() {
 	s.Require().NoError(s.DestroyTestDB())
-	s.Require().NoError(s.GatewayManager.CloseGateway())
 }
 
 func (s *ApiTestSuite) SetupTest() {
@@ -64,7 +61,6 @@ func (s *ApiTestSuite) SetupTest() {
 
 func (s *ApiTestSuite) TearDownTest() {
 	s.assertTokenVerifier()
-	s.GatewayManager.DestroyGatewaySessions()
 	s.DBCleaner.Clean(s.AllTables()...)
 }
 
@@ -99,7 +95,7 @@ func (s *ApiTestSuite) TestListGroups() {
 	lastDescription := ""
 	for i, respRoom := range respRooms {
 		data := respRoom.(map[string]interface{})
-		room, ok := rooms[int(data["room"].(float64))]
+		room, ok := rooms[data["room"].(string)]
 		s.Require().True(ok, "unknown room [%d] %v", i, data["room"])
 		s.Equal(gateways[room.DefaultGatewayID].Name, data["janus"], "Janus")
 		s.Equal(room.Name, data["description"], "description")
@@ -146,7 +142,7 @@ func (s *ApiTestSuite) TestListGroupsWithNumUsers() {
 	lastDescription := ""
 	for i, respRoom := range respRooms {
 		data := respRoom.(map[string]interface{})
-		room, ok := rooms[int(data["room"].(float64))]
+		room, ok := rooms[data["room"].(string)]
 		s.Require().True(ok, "unknown room [%d] %v", i, data["room"])
 		s.Equal(gateways[room.DefaultGatewayID].Name, data["janus"], "Janus")
 		s.Equal(room.Name, data["description"], "description")
@@ -172,7 +168,7 @@ func (s *ApiTestSuite) TestCreateGroupBadJSON() {
 
 func (s *ApiTestSuite) TestCreateGroupUnknownGateway() {
 	roomInfo := V1RoomInfo{
-		Room:        1234,
+		Room:        "1234",
 		Janus:       "unknown",
 		Description: "description",
 	}
@@ -189,7 +185,7 @@ func (s *ApiTestSuite) TestCreateGroup() {
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
 	roomInfo := V1RoomInfo{
-		Room:        1234,
+		Room:        "1234",
 		Janus:       gateway.Name,
 		Description: "description",
 	}
@@ -224,7 +220,7 @@ func (s *ApiTestSuite) TestCreateGroupExiting() {
 	}
 
 	b, _ := json.Marshal(roomInfo)
-	req, _ := http.NewRequest("PUT", fmt.Sprintf("/group/%d", roomInfo.Room), bytes.NewBuffer(b))
+	req, _ := http.NewRequest("PUT", fmt.Sprintf("/group/%s", roomInfo.Room), bytes.NewBuffer(b))
 	s.apiAuthP(req, []string{common.RoleRoot})
 	resp := s.request(req)
 	s.Require().Equal(http.StatusOK, resp.Code)
@@ -260,7 +256,7 @@ func (s *ApiTestSuite) TestGetRoomNotFound() {
 	room.Disabled = true
 	_, err := room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled))
 	s.Require().NoError(err)
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
 	s.apiAuth(req)
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
@@ -270,7 +266,7 @@ func (s *ApiTestSuite) TestGetRoomNotFound() {
 	room.RemovedAt = null.TimeFrom(time.Now().UTC())
 	_, err = room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled, models.RoomColumns.RemovedAt))
 	s.Require().NoError(err)
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
 	s.apiAuth(req)
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
@@ -287,7 +283,7 @@ func (s *ApiTestSuite) TestGetRoom() {
 	}
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 
@@ -372,7 +368,7 @@ func (s *ApiTestSuite) TestListRooms() {
 
 	for i, respRoom := range body {
 		data := respRoom.(map[string]interface{})
-		room, ok := rooms[int(data["room"].(float64))]
+		room, ok := rooms[data["room"].(string)]
 		s.Require().True(ok, "unknown room [%d] %v", i, data["room"])
 
 		// verify room's attributes
@@ -479,7 +475,7 @@ func (s *ApiTestSuite) TestUpdateRoomNotFound() {
 	room.Disabled = true
 	_, err := room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled))
 	s.Require().NoError(err)
-	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%d", room.GatewayUID), nil)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%s", room.GatewayUID), nil)
 	s.apiAuthP(req, []string{common.RoleShidur})
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
@@ -489,7 +485,7 @@ func (s *ApiTestSuite) TestUpdateRoomNotFound() {
 	room.RemovedAt = null.TimeFrom(time.Now().UTC())
 	_, err = room.Update(s.DB, boil.Whitelist(models.RoomColumns.Disabled, models.RoomColumns.RemovedAt))
 	s.Require().NoError(err)
-	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%d", room.GatewayUID), nil)
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%s", room.GatewayUID), nil)
 	s.apiAuthP(req, []string{common.RoleShidur})
 	resp = s.request(req)
 	s.Require().Equal(http.StatusNotFound, resp.Code)
@@ -500,7 +496,7 @@ func (s *ApiTestSuite) TestUpdateRoom() {
 	room := s.CreateRoom(gateway)
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertTokenVerifier()
@@ -521,11 +517,11 @@ func (s *ApiTestSuite) TestUpdateRoom() {
 		},
 	}
 	payloadJson, _ := json.Marshal(v1Room)
-	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%d", room.GatewayUID), bytes.NewBuffer(payloadJson))
+	req, _ = http.NewRequest("PUT", fmt.Sprintf("/rooms/%s", room.GatewayUID), bytes.NewBuffer(payloadJson))
 	s.apiAuthP(req, []string{common.RoleShidur})
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%d", room.GatewayUID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.Equal(v1Room.Extra, body["extra"], "extra")
@@ -1194,7 +1190,7 @@ func (s *ApiTestSuite) TestHandleProtocolBadTextJSON() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     "someone",
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     "{\"bad\":\"json",
@@ -1223,7 +1219,7 @@ func (s *ApiTestSuite) TestHandleProtocolUnknownGateway() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1252,7 +1248,7 @@ func (s *ApiTestSuite) TestHandleProtocolUnknownRoom() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1284,7 +1280,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnter() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1323,7 +1319,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnterUnknownUser() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1362,7 +1358,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnterExistingSession() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1404,7 +1400,7 @@ func (s *ApiTestSuite) TestHandleProtocolQuestion() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1464,7 +1460,7 @@ func (s *ApiTestSuite) TestHandleProtocolCamera() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1524,7 +1520,7 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1000,
+		Room:     "1000",
 		From:     v1User.ID,
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1589,7 +1585,7 @@ func (s *ApiTestSuite) TestHandleServiceProtocolBadTextJSON() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1001,
+		Room:     "1001",
 		From:     "someone",
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     "{\"bad\":\"json",
@@ -1615,7 +1611,7 @@ func (s *ApiTestSuite) TestHandleServiceProtocolAudioOutMissingRoom() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1001,
+		Room:     "1001",
 		From:     "someone",
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1642,7 +1638,7 @@ func (s *ApiTestSuite) TestHandleServiceProtocolAudioOutUnknownRoom() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1001,
+		Room:     "1001",
 		From:     "someone",
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1670,7 +1666,7 @@ func (s *ApiTestSuite) TestHandleServiceProtocolAudioOut() {
 
 	event := janus.TextroomPostMsg{
 		Textroom: "message",
-		Room:     1001,
+		Room:     "1001",
 		From:     "someone",
 		Date:     janus.DateTime{Time: time.Now()},
 		Text:     string(payloadJson),
@@ -1688,7 +1684,7 @@ func (s *ApiTestSuite) TestHandleServiceProtocolAudioOut() {
 	body := s.request200json(req)
 
 	// verify rooms statistics
-	stats, ok := body[strconv.Itoa(room.GatewayUID)]
+	stats, ok := body[room.GatewayUID]
 	s.Require().True(ok, "room stats ok")
 	statsObj, ok := stats.(map[string]interface{})
 	s.Require().True(ok, "room stats is not object")
@@ -1727,7 +1723,7 @@ func (s *ApiTestSuite) TestMQTTHandleServiceProtocolAudioOut() {
 		body = s.request200json(req)
 		s.T().Logf("TestMQTTHandleServiceProtocolAudioOut body: %+v", body)
 
-		if stats, ok := body[strconv.Itoa(room.GatewayUID)]; ok {
+		if stats, ok := body[room.GatewayUID]; ok {
 			if statsObj, ok := stats.(map[string]interface{}); ok && int(statsObj["on_air"].(float64)) == 1 {
 				break
 			}
@@ -1736,7 +1732,7 @@ func (s *ApiTestSuite) TestMQTTHandleServiceProtocolAudioOut() {
 	}
 
 	// verify rooms statistics
-	stats, ok := body[strconv.Itoa(room.GatewayUID)]
+	stats, ok := body[room.GatewayUID]
 	s.Require().True(ok, "room stats ok")
 	statsObj, ok := stats.(map[string]interface{})
 	s.Require().True(ok, "room stats is not object")
@@ -1744,24 +1740,14 @@ func (s *ApiTestSuite) TestMQTTHandleServiceProtocolAudioOut() {
 }
 
 func (s *ApiTestSuite) TestV2GetConfig() {
-	janusAdminAPI := new(mocks.AdminAPI)
 	roomsGateways := make(map[string]*models.Gateway)
 	streamingGateways := make(map[string]*models.Gateway)
 	for i := 0; i < 3; i++ {
 		gateway := s.CreateGateway()
 		roomsGateways[gateway.Name] = gateway
-		domain.GatewayAdminAPIRegistry.Set(gateway, janusAdminAPI)
 		gateway = s.CreateGatewayP(common.GatewayTypeStreaming, "admin_url", "janusoverlord")
 		streamingGateways[gateway.Name] = gateway
-		domain.GatewayAdminAPIRegistry.Set(gateway, janusAdminAPI)
 	}
-
-	listTokensResponse := &janus_admin.ListTokensResponse{
-		Data: map[string][]*janus_admin.StoredToken{"tokens": {}},
-	}
-	janusAdminAPI.On("ListTokens", mock.Anything, mock.Anything).Return(listTokensResponse, nil)
-	janusAdminAPI.On("AddToken", mock.Anything, mock.Anything).Return(nil, nil)
-	domain.NewGatewayTokensManager(s.DB, 1).SyncAll()
 
 	kvs := make([]*models.DynamicConfig, 3)
 	for i := range kvs {
@@ -1782,7 +1768,6 @@ func (s *ApiTestSuite) TestV2GetConfig() {
 		s.Equal(gateway.Name, data["name"], "name")
 		s.Equal(gateway.URL, data["url"], "url")
 		s.Equal(gateway.Type, data["type"], "type")
-		s.NotEmpty(data["token"], "token")
 	}
 	for name, respGateway := range gateways[common.GatewayTypeStreaming].(map[string]interface{}) {
 		gateway, ok := streamingGateways[name]
@@ -1791,7 +1776,6 @@ func (s *ApiTestSuite) TestV2GetConfig() {
 		s.Equal(gateway.Name, data["name"], "name")
 		s.Equal(gateway.URL, data["url"], "url")
 		s.Equal(gateway.Type, data["type"], "type")
-		s.NotEmpty(data["token"], "token")
 	}
 
 	iceServers := body["ice_servers"].(map[string]interface{})
@@ -1808,8 +1792,6 @@ func (s *ApiTestSuite) TestV2GetConfig() {
 	ts, err := time.Parse(time.RFC3339Nano, body["last_modified"].(string))
 	s.NoError(err, "parse last_modified")
 	s.InEpsilon(ts.UnixNano(), kvs[len(kvs)-1].UpdatedAt.UnixNano(), 100, "last_modified")
-
-	janusAdminAPI.AssertNumberOfCalls(s.T(), "AddToken", 2*len(roomsGateways))
 }
 
 func (s *ApiTestSuite) TestV2GetRoomsStatistics() {
@@ -1832,7 +1814,7 @@ func (s *ApiTestSuite) TestV2GetRoomsStatistics() {
 
 	// verify rooms statistics
 	for i := range rooms {
-		stats, ok := body[strconv.Itoa(rooms[i].GatewayUID)]
+		stats, ok := body[rooms[i].GatewayUID]
 		s.Require().True(ok, "room stats ok %d", i)
 		statsObj, ok := stats.(map[string]interface{})
 		s.Require().True(ok, "room stats is not object %d", i)

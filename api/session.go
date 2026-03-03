@@ -9,7 +9,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/edoshor/janus-go"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 	"github.com/lib/pq"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"

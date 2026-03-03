@@ -1,11 +1,6 @@
 package testutil
 
-import (
-	"os"
-
-	"github.com/edoshor/janus-go"
-	janus_admin "github.com/edoshor/janus-go/admin"
-)
+import "os"
 
 type GatewayConfig struct {
 	GatewayURL  string
@@ -14,9 +9,7 @@ type GatewayConfig struct {
 }
 
 type GatewayManager struct {
-	Config   *GatewayConfig
-	client   *janus.Gateway
-	adminAPI janus_admin.AdminAPI
+	Config *GatewayConfig
 }
 
 func (m *GatewayManager) Init() {
@@ -35,70 +28,4 @@ func (m *GatewayManager) Init() {
 	if val := os.Getenv("TEST_GATEWAY_ADMIN_SECRET"); val != "" {
 		m.Config.AdminSecret = val
 	}
-}
-
-func (m *GatewayManager) Gateway() (*janus.Gateway, error) {
-	if m.client != nil {
-		return m.client, nil
-	}
-
-	var err error
-	m.client, err = janus.Connect(m.Config.GatewayURL)
-	if err != nil {
-		return nil, err
-	}
-
-	adminAPI, err := m.GatewayAdminAPI()
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = adminAPI.AddToken("default-test-token", []string{})
-	if err != nil {
-		return nil, err
-	}
-	m.client.Token = "default-test-token"
-
-	return m.client, nil
-}
-
-func (m *GatewayManager) GatewayAdminAPI() (janus_admin.AdminAPI, error) {
-	if m.adminAPI != nil {
-		return m.adminAPI, nil
-	}
-
-	var err error
-	m.adminAPI, err = janus_admin.NewAdminAPI(m.Config.AdminURL, m.Config.AdminSecret)
-	return m.adminAPI, err
-}
-
-func (m *GatewayManager) NewGatewaySession() (*janus.Session, error) {
-	g, err := m.Gateway()
-	if err != nil {
-		return nil, err
-	}
-	return g.Create()
-}
-
-func (m *GatewayManager) DestroyGatewaySessions() {
-	if m.client == nil {
-		return
-	}
-
-	for _, session := range m.client.Sessions {
-		for _, handle := range session.Handles {
-			handle.Detach()
-		}
-		session.Destroy()
-	}
-}
-
-func (m *GatewayManager) CloseGateway() error {
-	if m.client == nil {
-		return nil
-	}
-
-	m.DestroyGatewaySessions()
-
-	return m.client.Close()
 }

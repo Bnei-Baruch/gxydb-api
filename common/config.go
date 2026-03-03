@@ -18,7 +18,6 @@ type config struct {
 	IceServers            map[string][]string
 	ServicePasswords      []string
 	Secret                string
-	MonitorGatewayTokens  bool
 	GatewayRoomsSecret    string
 	GatewayPluginAdminKey string
 	CollectPeriodicStats  bool
@@ -54,7 +53,6 @@ func newConfig() *config {
 		SkipPermissions:       false,
 		IceServers:            make(map[string][]string),
 		ServicePasswords:      make([]string, 0),
-		MonitorGatewayTokens:  true,
 		GatewayRoomsSecret:    "",
 		GatewayPluginAdminKey: "",
 		CollectPeriodicStats:  true,
@@ -114,9 +112,6 @@ func Init() {
 	}
 	if val := os.Getenv("SECRET"); val != "" {
 		Config.Secret = val
-	}
-	if val := os.Getenv("MONITOR_GATEWAY_TOKENS"); val != "" {
-		Config.MonitorGatewayTokens = val == "true"
 	}
 	if val := os.Getenv("GATEWAY_ROOMS_SECRET"); val != "" {
 		Config.GatewayRoomsSecret = val

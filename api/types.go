@@ -3,10 +3,9 @@ package api
 import "time"
 
 type V2Gateway struct {
-	Name  string `json:"name"`
-	URL   string `json:"url"`
-	Type  string `json:"type"`
-	Token string `json:"token"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Type string `json:"type"`
 }
 
 type V2Config struct {

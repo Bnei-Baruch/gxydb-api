@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	janus_admin "github.com/edoshor/janus-go/admin"
-	janus_plugins "github.com/edoshor/janus-go/plugins"
 	"github.com/gorilla/mux"
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -20,10 +18,10 @@ import (
 	"github.com/volatiletech/sqlboiler/v4/queries/qm"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
-	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
 	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/mathutil"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
 )
@@ -110,22 +108,21 @@ func (a *App) AdminGatewaysHandleInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api, err := domain.GatewayAdminAPIRegistry.For(gateway)
-	if err != nil {
-		httputil.NewInternalError(pkgerr.WithMessage(err, "init admin api")).Abort(w, r)
+	if a.janusAdmin == nil {
+		httputil.NewInternalError(pkgerr.New("MQTT admin client not initialized")).Abort(w, r)
 		return
 	}
 
-	info, err := api.HandleInfo(sessionID, handleID)
+	info, err := a.janusAdmin.HandleInfo(gateway.Name, sessionID, handleID)
 	if err != nil {
-		var tErr *janus_admin.ErrorAMResponse
-		if errors.As(err, &tErr) {
-			if tErr.Err.Code == 458 || tErr.Err.Code == 459 { // no such session or no such handle
+		var aErr *janus.AdminError
+		if errors.As(err, &aErr) {
+			if aErr.Code == 458 || aErr.Code == 459 {
 				httputil.NewNotFoundError().Abort(w, r)
 				return
 			}
 		}
-		httputil.NewInternalError(pkgerr.Wrap(err, "api.HandleInfo")).Abort(w, r)
+		httputil.NewInternalError(pkgerr.Wrap(err, "janusAdmin.HandleInfo")).Abort(w, r)
 		return
 	}
 
@@ -171,16 +168,15 @@ func (a *App) AdminListRooms(w http.ResponseWriter, r *http.Request) {
 		var clauses []string
 		var args []interface{}
 
-		// numeric value ?
 		if numVal, err := strconv.ParseUint(roomsRequest.Term, 10, 64); err == nil {
-			clauses = append(clauses,
-				fmt.Sprintf("%s = ?", models.RoomColumns.ID),
-				fmt.Sprintf("%s = ?", models.RoomColumns.GatewayUID))
-			args = append(args, numVal, numVal)
+			clauses = append(clauses, fmt.Sprintf("%s = ?", models.RoomColumns.ID))
+			args = append(args, numVal)
 		}
 
-		clauses = append(clauses, "name ~* ?")
-		args = append(args, roomsRequest.Term)
+		clauses = append(clauses,
+			fmt.Sprintf("%s = ?", models.RoomColumns.GatewayUID),
+			"name ~* ?")
+		args = append(args, roomsRequest.Term, roomsRequest.Term)
 
 		mods = append(mods, qm.Where(strings.Join(clauses, " OR "), args...))
 	}
@@ -249,7 +245,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 
 	if data.GatewayUID == "" || data.GatewayUID == "0" {
 		var maxUID string
-		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid::int), 0) + 1"), qm.From(models.TableNames.Rooms)).
+		if err := models.NewQuery(qm.Select("coalesce(max(gateway_uid::int) filter (where gateway_uid ~ '^[0-9]+$'), 0) + 1"), qm.From(models.TableNames.Rooms)).
 			QueryRow(a.DB).Scan(&maxUID); err != nil {
 			httputil.NewInternalError(pkgerr.Wrap(err, "fetch max gateway_uid")).Abort(w, r)
 			return
@@ -266,41 +262,37 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 			return pkgerr.WithStack(err)
 		}
 
-		// create room in gateways
-		gatewayUID, _ := strconv.Atoi(data.GatewayUID) // Convert string to int for Janus API
-		room := &janus_plugins.VideoroomRoom{
-			Room:               gatewayUID,
-			Description:        data.Name,
-			Secret:             common.Config.GatewayRoomsSecret,
-			Publishers:         100,
-			Bitrate:            64000,
-			FirFreq:            10,
-			AudioCodec:         "opus",
-			VideoCodec:         "h264",
-			H264Profile:        "42e01f",
-			AudioLevelExt:      true,
-			AudioLevelEvent:    true,
-			AudioActivePackets: 25,
-			AudioLevelAverage:  100,
-			VideoOrientExt:     true,
-			PlayoutDelayExt:    true,
-			TransportWideCCExt: true,
-		}
-		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayPluginAdminKey).
-			CreateRequest(room, true, nil)
-
-		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
-				continue
+		// create room in gateways via MQTT
+		if a.janusAdmin != nil {
+			request := map[string]interface{}{
+				"request":              "create",
+				"room":                 data.GatewayUID,
+				"description":          data.Name,
+				"secret":               common.Config.GatewayRoomsSecret,
+				"publishers":           100,
+				"bitrate":              64000,
+				"fir_freq":             10,
+				"audiocodec":           "opus",
+				"videocodec":           "h264",
+				"h264_profile":         "42e01f",
+				"audiolevel_ext":       true,
+				"audiolevel_event":     true,
+				"audio_active_packets": 25,
+				"audio_level_average":  100,
+				"videoorient_ext":      true,
+				"playoutdelay_ext":     true,
+				"transport_wide_cc_ext": true,
+				"permanent":            true,
 			}
 
-			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
-			if err != nil {
-				return pkgerr.WithMessage(err, "Admin API for gateway")
-			}
+			for _, gateway := range a.cache.gateways.Values() {
+				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+					continue
+				}
 
-			if _, err = api.MessagePlugin(request); err != nil {
-				return pkgerr.Wrap(err, "api.MessagePlugin [videoroom]")
+				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
+					return pkgerr.Wrapf(err, "create room on gateway %s", gateway.Name)
+				}
 			}
 		}
 
@@ -423,30 +415,27 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 
-		// update room in gateways
-		gatewayUID, _ := strconv.Atoi(data.GatewayUID) // Convert string to int for Janus API
-		room := &janus_plugins.VideoroomRoomForEdit{
-			Room:        gatewayUID,
-			Description: data.Name,
-			Publishers:  100,   // same as create
-			Bitrate:     64000, // same as create
-			FirFreq:     10,    // same as create
-		}
-		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayPluginAdminKey).
-			EditRequest(room, true, common.Config.GatewayRoomsSecret)
-
-		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
-				continue
+		// update room in gateways via MQTT
+		if a.janusAdmin != nil {
+			request := map[string]interface{}{
+				"request":     "edit",
+				"room":        data.GatewayUID,
+				"new_description": data.Name,
+				"secret":      common.Config.GatewayRoomsSecret,
+				"new_publishers": 100,
+				"new_bitrate": 64000,
+				"new_fir_freq": 10,
+				"permanent":   true,
 			}
 
-			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
-			if err != nil {
-				return pkgerr.WithMessage(err, "Admin API for gateway")
-			}
+			for _, gateway := range a.cache.gateways.Values() {
+				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+					continue
+				}
 
-			if _, err = api.MessagePlugin(request); err != nil {
-				return pkgerr.Wrap(err, "api.MessagePlugin [videoroom]")
+				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
+					return pkgerr.Wrapf(err, "edit room on gateway %s", gateway.Name)
+				}
 			}
 		}
 
@@ -499,22 +488,23 @@ func (a *App) AdminDeleteRoom(w http.ResponseWriter, r *http.Request) {
 			return httputil.NewInternalError(pkgerr.WithStack(err))
 		}
 
-		gatewayUID, _ := strconv.Atoi(room.GatewayUID) // Convert string to int for Janus API
-		request := janus_plugins.MakeVideoroomRequestFactory(common.Config.GatewayPluginAdminKey).
-			DestroyRequest(gatewayUID, true, common.Config.GatewayRoomsSecret)
-
-		for _, gateway := range a.cache.gateways.Values() {
-			if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
-				continue
+		// destroy room in gateways via MQTT
+		if a.janusAdmin != nil {
+			request := map[string]interface{}{
+				"request":   "destroy",
+				"room":      room.GatewayUID,
+				"secret":    common.Config.GatewayRoomsSecret,
+				"permanent": true,
 			}
 
-			api, err := domain.GatewayAdminAPIRegistry.For(gateway)
-			if err != nil {
-				return pkgerr.WithMessage(err, "Admin API for gateway")
-			}
+			for _, gateway := range a.cache.gateways.Values() {
+				if gateway.Disabled || gateway.RemovedAt.Valid || gateway.Type != common.GatewayTypeRooms {
+					continue
+				}
 
-			if _, err = api.MessagePlugin(request); err != nil {
-				return pkgerr.Wrap(err, "api.MessagePlugin [videoroom]")
+				if _, err := a.janusAdmin.MessagePlugin(gateway.Name, "janus.plugin.videoroom", request); err != nil {
+					return pkgerr.Wrapf(err, "destroy room on gateway %s", gateway.Name)
+				}
 			}
 		}
 
