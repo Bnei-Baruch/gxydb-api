@@ -436,7 +436,7 @@ func (a *App) V1GetComposite(w http.ResponseWriter, r *http.Request) {
 
 	composite, err := models.Composites(
 		models.CompositeWhere.Name.EQ(id),
-		qm.Load(models.CompositeRels.CompositesRooms),
+		qm.Load(models.CompositeRels.CompositesRooms, qm.OrderBy(models.CompositesRoomColumns.Position)),
 		qm.Load(qm.Rels(models.CompositeRels.CompositesRooms, models.CompositesRoomRels.Room),
 			models.RoomWhere.Disabled.EQ(false),
 			models.RoomWhere.RemovedAt.IsNull()),
@@ -647,8 +647,9 @@ func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
 	}
 
 	if session.GatewayID.Valid {
-		gateway, _ := a.cache.gateways.ByID(session.GatewayID.Int64)
-		user.Janus = gateway.Name
+		if gateway, ok := a.cache.gateways.ByID(session.GatewayID.Int64); ok {
+			user.Janus = gateway.Name
+		}
 	}
 
 	if session.Extra.Valid {
@@ -662,10 +663,16 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 	if gateway == nil {
 		gateway, _ = a.cache.gateways.ByID(room.DefaultGatewayID)
 	}
+
+	var gatewayName string
+	if gateway != nil {
+		gatewayName = gateway.Name
+	}
+
 	respRoom := &V1Room{
 		V1RoomInfo: V1RoomInfo{
 			Room:        room.GatewayUID,
-			Janus:       gateway.Name,
+			Janus:       gatewayName,
 			Description: room.Name,
 		},
 		Region: room.Region.String,
@@ -717,16 +724,19 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 
 func (a *App) makeV1Composite(composite *models.Composite) *V1Composite {
 	respComposite := &V1Composite{
-		VQuad: make([]*V1CompositeRoom, len(composite.R.CompositesRooms)),
+		VQuad: make([]*V1CompositeRoom, 0, len(composite.R.CompositesRooms)),
 	}
 
-	for i, cRoom := range composite.R.CompositesRooms {
+	for _, cRoom := range composite.R.CompositesRooms {
 		room := cRoom.R.Room
+		if room == nil {
+			continue
+		}
 		gateway, _ := a.cache.gateways.ByID(cRoom.GatewayID)
-		respComposite.VQuad[i] = &V1CompositeRoom{
+		respComposite.VQuad = append(respComposite.VQuad, &V1CompositeRoom{
 			V1Room:   *a.makeV1Room(room, gateway),
 			Position: cRoom.Position,
-		}
+		})
 	}
 
 	return respComposite
