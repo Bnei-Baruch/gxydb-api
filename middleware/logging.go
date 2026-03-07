@@ -69,7 +69,17 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	h2 := hlog.AccessHandler(func(r *http.Request, status, size int, duration time.Duration) {
 		path := r.URL.EscapedPath()
 
-		event := hlog.FromRequest(r).Info().
+		logger := hlog.FromRequest(r)
+		var event *zerolog.Event
+		switch {
+		case status >= http.StatusInternalServerError:
+			event = logger.Error()
+		case status >= http.StatusBadRequest:
+			event = logger.Warn()
+		default:
+			event = logger.Info()
+		}
+		event.
 			Str("method", r.Method).
 			Str("path", path).
 			Int("status", status).
