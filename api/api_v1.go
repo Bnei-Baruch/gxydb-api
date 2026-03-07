@@ -624,16 +624,23 @@ func (a *App) V1HandleServiceProtocol(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) makeV1User(room *models.Room, session *models.Session) *V1User {
+	var accountsID, email, username string
+	if session.R != nil && session.R.User != nil {
+		accountsID = session.R.User.AccountsID
+		email = session.R.User.Email.String
+		username = session.R.User.Username.String
+	}
+
 	user := &V1User{
-		ID:             session.R.User.AccountsID,
+		ID:             accountsID,
 		Display:        session.Display.String,
-		Email:          session.R.User.Email.String,
+		Email:          email,
 		Group:          room.Name,
 		IP:             session.IPAddress.String,
 		Name:           "",     // Useless. Shouldn't be used on the client side.
 		Role:           "user", // fixed. No more "groups" only "users"
 		System:         session.UserAgent.String,
-		Username:       session.R.User.Username.String, // Useless. Never seen a value here
+		Username:       username,
 		Room:           room.GatewayUID,
 		Timestamp:      session.CreatedAt.Unix(), // Not sure we really need this
 		Session:        session.GatewaySession.Int64,
