@@ -251,7 +251,7 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 
 	go func() {
 		if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
-			log.Error().Err(err).Str("user_id", user.ID).Str("email", user.Email).Str("room", user.Room).Msg("update session error")
+			log.Error().Err(err).Str("user_id", user.ID).Str("rfid", user.RFID).Str("email", user.Email).Str("room", user.Room).Msg("update session error")
 		}
 	}()
 }
