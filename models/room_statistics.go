@@ -251,7 +251,7 @@ func (roomStatisticL) LoadRoom(e boil.Executor, singular bool, maybeRoomStatisti
 
 	query := NewQuery(
 		qm.From(`rooms`),
-		qm.WhereIn(`rooms.id in ?`, argsSlice...),
+		qm.WhereIn(`rooms.gateway_uid in ?`, argsSlice...),
 	)
 	if mods != nil {
 		mods.Apply(query)
@@ -290,7 +290,7 @@ func (roomStatisticL) LoadRoom(e boil.Executor, singular bool, maybeRoomStatisti
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if local.RoomID == fmt.Sprintf("%d", foreign.ID) {
+			if local.RoomID == foreign.GatewayUID {
 				local.R.Room = foreign
 				if foreign.R == nil {
 					foreign.R = &roomR{}

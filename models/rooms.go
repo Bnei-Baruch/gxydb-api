@@ -470,14 +470,14 @@ func (roomL) LoadRoomStatistic(e boil.Executor, singular bool, maybeRoom interfa
 		if object.R == nil {
 			object.R = &roomR{}
 		}
-		args[object.ID] = struct{}{}
+		args[object.GatewayUID] = struct{}{}
 	} else {
 		for _, obj := range slice {
 			if obj.R == nil {
 				obj.R = &roomR{}
 			}
 
-			args[obj.ID] = struct{}{}
+			args[obj.GatewayUID] = struct{}{}
 		}
 	}
 
@@ -532,7 +532,7 @@ func (roomL) LoadRoomStatistic(e boil.Executor, singular bool, maybeRoom interfa
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if fmt.Sprintf("%d", local.ID) == foreign.RoomID {
+			if local.GatewayUID == foreign.RoomID {
 				local.R.RoomStatistic = foreign
 				if foreign.R == nil {
 					foreign.R = &roomStatisticR{}
@@ -579,13 +579,13 @@ func (roomL) LoadCompositesRooms(e boil.Executor, singular bool, maybeRoom inter
 		if object.R == nil {
 			object.R = &roomR{}
 		}
-		args[object.ID] = struct{}{}
+		args[object.GatewayUID] = struct{}{}
 	} else {
 		for _, obj := range slice {
 			if obj.R == nil {
 				obj.R = &roomR{}
 			}
-			args[obj.ID] = struct{}{}
+			args[obj.GatewayUID] = struct{}{}
 		}
 	}
 
@@ -638,7 +638,7 @@ func (roomL) LoadCompositesRooms(e boil.Executor, singular bool, maybeRoom inter
 
 	for _, foreign := range resultSlice {
 		for _, local := range slice {
-			if fmt.Sprintf("%d", local.ID) == foreign.RoomID {
+			if local.GatewayUID == foreign.RoomID {
 				local.R.CompositesRooms = append(local.R.CompositesRooms, foreign)
 				if foreign.R == nil {
 					foreign.R = &compositesRoomR{}
@@ -685,13 +685,13 @@ func (roomL) LoadSessions(e boil.Executor, singular bool, maybeRoom interface{},
 		if object.R == nil {
 			object.R = &roomR{}
 		}
-		args[object.ID] = struct{}{}
+		args[object.GatewayUID] = struct{}{}
 	} else {
 		for _, obj := range slice {
 			if obj.R == nil {
 				obj.R = &roomR{}
 			}
-			args[obj.ID] = struct{}{}
+			args[obj.GatewayUID] = struct{}{}
 		}
 	}
 
@@ -744,7 +744,7 @@ func (roomL) LoadSessions(e boil.Executor, singular bool, maybeRoom interface{},
 
 	for _, foreign := range resultSlice {
 		for _, local := range slice {
-			if queries.Equal(local.ID, foreign.RoomID) {
+			if local.GatewayUID == foreign.RoomID.String {
 				local.R.Sessions = append(local.R.Sessions, foreign)
 				if foreign.R == nil {
 					foreign.R = &sessionR{}

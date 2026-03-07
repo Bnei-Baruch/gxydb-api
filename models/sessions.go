@@ -578,7 +578,7 @@ func (sessionL) LoadRoom(e boil.Executor, singular bool, maybeSession interface{
 
 	query := NewQuery(
 		qm.From(`rooms`),
-		qm.WhereIn(`rooms.id in ?`, argsSlice...),
+		qm.WhereIn(`rooms.gateway_uid in ?`, argsSlice...),
 	)
 	if mods != nil {
 		mods.Apply(query)
@@ -617,7 +617,7 @@ func (sessionL) LoadRoom(e boil.Executor, singular bool, maybeSession interface{
 
 	for _, local := range slice {
 		for _, foreign := range resultSlice {
-			if queries.Equal(local.RoomID, foreign.ID) {
+			if local.RoomID.Valid && local.RoomID.String == foreign.GatewayUID {
 				local.R.Room = foreign
 				if foreign.R == nil {
 					foreign.R = &roomR{}
