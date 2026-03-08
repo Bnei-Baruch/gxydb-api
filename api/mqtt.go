@@ -391,9 +391,11 @@ func (l *MQTTListener) HandleGatewayStatus(c mqtt.Client, m mqtt.Message) {
 			
 			if isPrimary {
 				// Start failover timer
-				status.OfflineTimer = time.AfterFunc(common.Config.FailoverWaitTime, func() {
-					l.triggerFailover(context.Background(), serverName)
-				})
+			status.OfflineTimer = time.AfterFunc(common.Config.FailoverWaitTime, func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				l.triggerFailover(ctx, serverName)
+			})
 				
 				log.Warn().
 					Str("server", serverName).
