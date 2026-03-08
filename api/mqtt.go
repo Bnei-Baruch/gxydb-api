@@ -219,7 +219,6 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 		Bytes("payload", m.Payload()).
 		Msg("MQTT handle event")
 
-	ctx := context.Background()
 	event, err := janus.ParseEvent(m.Payload())
 	if err != nil {
 		log.Error().Err(err).Msg("parsing event error")
@@ -227,6 +226,8 @@ func (l *MQTTListener) HandleEvent(c mqtt.Client, m mqtt.Message) {
 	}
 
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		if err := l.SessionManager.HandleEvent(ctx, event); err != nil {
 			log.Error().Err(err).Msg("event error")
 		}
@@ -247,9 +248,10 @@ func (l *MQTTListener) UpdateSession(c mqtt.Client, m mqtt.Message) {
 		log.Error().Err(err).Bytes("payload", m.Payload()).Msg("json.Unmarshal")
 		return
 	}
-	ctx := context.Background()
 
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		if err := l.SessionManager.UpsertSession(ctx, user); err != nil {
 			log.Error().Err(err).Str("user_id", user.ID).Str("rfid", user.RFID).Str("email", user.Email).Str("room", user.Room).Msg("update session error")
 		}
