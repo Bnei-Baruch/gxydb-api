@@ -493,10 +493,10 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
-		cRooms := make(models.CompositesRoomSlice, len(data.VQuad))
+		var cRooms models.CompositesRoomSlice
 		for i, item := range data.VQuad {
 			if item == nil {
-				continue // client doesn't care so why should we ?
+				continue
 			}
 
 			gateway, ok := a.cache.gateways.ByName(item.Janus)
@@ -508,18 +508,20 @@ func (a *App) V1UpdateComposite(w http.ResponseWriter, r *http.Request) {
 				return httputil.NewBadRequestError(nil, fmt.Sprintf("unknown room %s", item.Room))
 			}
 
-			cRooms[i] = &models.CompositesRoom{
+			cRooms = append(cRooms, &models.CompositesRoom{
 				RoomID:    room.GatewayUID,
 				GatewayID: gateway.ID,
 				Position:  i + 1,
-			}
+			})
 		}
 
 		if _, err := composite.CompositesRooms().DeleteAll(tx); err != nil {
 			return pkgerr.WithStack(err)
 		}
-		if err := composite.AddCompositesRooms(tx, true, cRooms...); err != nil {
-			return pkgerr.WithStack(err)
+		if len(cRooms) > 0 {
+			if err := composite.AddCompositesRooms(tx, true, cRooms...); err != nil {
+				return pkgerr.WithStack(err)
+			}
 		}
 
 		return nil
