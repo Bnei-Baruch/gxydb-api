@@ -23,8 +23,8 @@ func NewRoomStatisticsManager(db common.DBInterface) *RoomStatisticsManager {
 	}
 }
 
-func (m *RoomStatisticsManager) OnAir(roomID string) error {
-	roomStats, err := m.getOrCreate(roomID)
+func (m *RoomStatisticsManager) OnAir(ctx context.Context, roomID string) error {
+	roomStats, err := m.getOrCreate(ctx, roomID)
 	if err != nil {
 		return err
 	}
@@ -34,8 +34,6 @@ func (m *RoomStatisticsManager) OnAir(roomID string) error {
 }
 
 func (m *RoomStatisticsManager) GetAll() ([]*models.RoomStatistic, error) {
-	// Note: Room relationship no longer exists (room_id is string gateway_uid, no FK constraint)
-	// Load rooms manually if needed
 	return models.RoomStatistics().All(m.db)
 }
 
@@ -52,8 +50,12 @@ func (m *RoomStatisticsManager) Reset(ctx context.Context) error {
 	})
 }
 
-func (m *RoomStatisticsManager) getOrCreate(roomID string) (*models.RoomStatistic, error) {
-	tx, err := m.db.Begin()
+func (m *RoomStatisticsManager) getOrCreate(ctx context.Context, roomID string) (*models.RoomStatistic, error) {
+	db, ok := m.db.(boil.ContextBeginner)
+	if !ok {
+		return nil, pkgerr.New("db does not support BeginTx")
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -73,14 +75,4 @@ func (m *RoomStatisticsManager) getOrCreate(roomID string) (*models.RoomStatisti
 	}
 
 	return roomStats, tx.Commit()
-}
-
-func (m *RoomStatisticsManager) update(roomStats *models.RoomStatistic) error {
-	return sqlutil.InTx(context.TODO(), m.db, func(tx *sql.Tx) error {
-		_, err := roomStats.Update(tx, boil.Infer())
-		if err != nil {
-			return pkgerr.WithStack(err)
-		}
-		return nil
-	})
 }

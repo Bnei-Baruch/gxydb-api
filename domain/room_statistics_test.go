@@ -97,7 +97,7 @@ func (s *RoomStatisticsTestSuite) TestOnAir() {
 	room := s.CreateRoom(gateway)
 
 	for i := 0; i < 3; i++ {
-		err = rms.OnAir(room.GatewayUID)
+		err = rms.OnAir(context.Background(), room.GatewayUID)
 		s.Require().NoError(err)
 		rs, err = rms.GetAll()
 		s.Require().NoError(err)

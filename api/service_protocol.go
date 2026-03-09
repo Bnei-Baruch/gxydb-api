@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -10,7 +11,7 @@ import (
 )
 
 type ServiceProtocolHandler interface {
-	HandleMessage(string) error
+	HandleMessage(ctx context.Context, payload string) error
 }
 
 type V1ServiceProtocolHandler struct {
@@ -25,7 +26,7 @@ func NewV1ServiceProtocolHandler(cache *AppCache, rsm *domain.RoomStatisticsMana
 	}
 }
 
-func (h *V1ServiceProtocolHandler) HandleMessage(payload string) error {
+func (h *V1ServiceProtocolHandler) HandleMessage(ctx context.Context, payload string) error {
 	var pMsg V1ServiceProtocolMessageText
 	if err := json.Unmarshal([]byte(payload), &pMsg); err != nil {
 		return pkgerr.WithStack(WrappingProtocolError(err, fmt.Sprintf("json.Unmarshal: %s", err.Error())))
@@ -43,7 +44,7 @@ func (h *V1ServiceProtocolHandler) HandleMessage(payload string) error {
 				return NewProtocolError(fmt.Sprintf("unknown room %s", *pMsg.Room))
 			}
 
-			if err := h.roomsStatisticsManager.OnAir(room.GatewayUID); err != nil {
+			if err := h.roomsStatisticsManager.OnAir(ctx, room.GatewayUID); err != nil {
 				return pkgerr.Wrap(err, "roomsStatisticsManager.OnAir")
 			}
 		}

@@ -23,7 +23,13 @@ func WrappingTxError(err error, msg string) *TxError {
 }
 
 func InTx(ctx context.Context, beginner boil.Beginner, f func(*sql.Tx) error) error {
-	tx, err := beginner.Begin()
+	var tx *sql.Tx
+	var err error
+	if ctxBeginner, ok := beginner.(boil.ContextBeginner); ok {
+		tx, err = ctxBeginner.BeginTx(ctx, nil)
+	} else {
+		tx, err = beginner.Begin()
+	}
 	if err != nil {
 		return pkgerr.WithStack(WrappingTxError(err, "begin tx"))
 	}

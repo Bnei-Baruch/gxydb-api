@@ -201,9 +201,10 @@ func (l *MQTTListener) HandleServiceProtocol(c mqtt.Client, m mqtt.Message) {
 		Bytes("payload", m.Payload()).
 		Msg("MQTT handle service protocol")
 
-	// A MessageHandler (called when a new message is received) must not block (unless ClientOptions.SetOrderMatters(false) set). If you wish to perform a long-running task, or publish a message, then please use a go routine (blocking in the handler is a common cause of unexpected pingresp  not received, disconnecting errors).
 	go func() {
-		if err := l.serviceProtocolHandler.HandleMessage(string(m.Payload())); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := l.serviceProtocolHandler.HandleMessage(ctx, string(m.Payload())); err != nil {
 			log.Error().Err(err).Msg("service protocol error")
 		}
 	}()

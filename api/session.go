@@ -380,7 +380,10 @@ func (psc *PeriodicSessionCleaner) clean() {
 	}
 	log.Info().Msgf("PeriodicSessionCleaner found %d sessions to be cleaned", len(sessions))
 
-	err = sqlutil.InTx(context.TODO(), psc.db, func(tx *sql.Tx) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = sqlutil.InTx(ctx, psc.db, func(tx *sql.Tx) error {
 		if len(sessions) > 0 {
 			b, err := json.Marshal(map[string]interface{}{
 				"clean_session": time.Now().UTC(),
@@ -412,7 +415,7 @@ func (psc *PeriodicSessionCleaner) clean() {
 		}
 
 		if psc.roomServerAssignmentManager != nil {
-			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(context.TODO()); err != nil {
+			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
 				return pkgerr.Wrap(err, "clean inactive assignments")
 			}
 		}
