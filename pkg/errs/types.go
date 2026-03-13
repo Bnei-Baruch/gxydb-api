@@ -6,6 +6,9 @@ type WithMessage struct {
 }
 
 func (e *WithMessage) Error() string {
+	if e.Err != nil {
+		return e.Msg + ": " + e.Err.Error()
+	}
 	return e.Msg
 }
 

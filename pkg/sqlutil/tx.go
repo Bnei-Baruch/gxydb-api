@@ -5,7 +5,6 @@ import (
 	"database/sql"
 
 	pkgerr "github.com/pkg/errors"
-	"github.com/rs/zerolog/log"
 	"github.com/volatiletech/sqlboiler/v4/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/pkg/errs"
@@ -34,25 +33,18 @@ func InTx(ctx context.Context, beginner boil.Beginner, f func(*sql.Tx) error) er
 		return pkgerr.WithStack(WrappingTxError(err, "begin tx"))
 	}
 
-	// rollback on panics
 	defer func() {
 		if p := recover(); p != nil {
-			if ex := tx.Rollback(); ex != nil {
-				log.Ctx(ctx).Error().Err(ex).Msg("rollback error on panic")
-			}
-			panic(p) // re-throw panic after Rollback
+			_ = tx.Rollback()
+			panic(p)
 		}
+		_ = tx.Rollback()
 	}()
 
-	// invoke logic and rollback on errors
 	if err := f(tx); err != nil {
-		if ex := tx.Rollback(); ex != nil {
-			return pkgerr.WithStack(WrappingTxError(err, "tx.Rollback"))
-		}
 		return err
 	}
 
-	// commit transaction
 	if err := tx.Commit(); err != nil {
 		return pkgerr.WithStack(WrappingTxError(err, "tx.Commit"))
 	}
