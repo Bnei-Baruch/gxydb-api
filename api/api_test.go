@@ -570,7 +570,7 @@ func (s *ApiTestSuite) TestGetUser() {
 	session := s.CreateSession(user, gateway, room)
 	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
 
-	req, _ := http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("/users/%s", session.GatewayFeed.String), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1Session(session, body)
@@ -700,7 +700,7 @@ func (s *ApiTestSuite) TestUpdateSession() {
 	s.NoError(err, "parse config_last_modified")
 	s.InEpsilon(ts.UnixNano(), kv.UpdatedAt.UnixNano(), 100, "config_last_modified")
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -711,7 +711,7 @@ func (s *ApiTestSuite) TestUpdateSession() {
 	req, _ = http.NewRequest("PUT", fmt.Sprintf("/users/%s", user.AccountsID), bytes.NewBuffer(payloadJson))
 	s.apiAuth(req)
 	s.request200json(req)
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1292,7 +1292,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnter() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1370,7 +1370,7 @@ func (s *ApiTestSuite) TestHandleProtocolEnterExistingSession() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1412,7 +1412,7 @@ func (s *ApiTestSuite) TestHandleProtocolQuestion() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1430,7 +1430,7 @@ func (s *ApiTestSuite) TestHandleProtocolQuestion() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1472,7 +1472,7 @@ func (s *ApiTestSuite) TestHandleProtocolCamera() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1490,7 +1490,7 @@ func (s *ApiTestSuite) TestHandleProtocolCamera() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1532,7 +1532,7 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body := s.request200json(req)
 	s.assertV1User(v1User, body)
@@ -1550,7 +1550,7 @@ func (s *ApiTestSuite) TestHandleProtocolSoundTest() {
 	req.SetBasicAuth(gateway.Name, gateway.Name)
 	s.request200json(req)
 
-	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", user.AccountsID), nil)
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/users/%s", v1User.RFID), nil)
 	s.apiAuth(req)
 	body = s.request200json(req)
 	s.assertV1User(v1User, body)

@@ -319,7 +319,11 @@ func (a *App) V1ListUsers(w http.ResponseWriter, r *http.Request) {
 	respSessions := make(map[string]*V1User, len(sessions))
 	for i := range sessions {
 		session := sessions[i]
-		respSessions[session.R.User.AccountsID] = a.makeV1User(session.R.Room, session)
+		key := session.GatewayFeed.String
+		if key == "" {
+			key = session.R.User.AccountsID
+		}
+		respSessions[key] = a.makeV1User(session.R.Room, session)
 	}
 
 	httputil.RespondWithJSON(w, http.StatusOK, respSessions)
@@ -333,25 +337,8 @@ func (a *App) V1GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID int64
-	err := models.Users(
-		qm.Select(models.UserColumns.ID),
-		models.UserWhere.AccountsID.EQ(id),
-		models.UserWhere.Disabled.EQ(false),
-		models.UserWhere.RemovedAt.IsNull(),
-	).QueryRow(a.DB).Scan(&userID)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			httputil.NewNotFoundError().Abort(w, r)
-		} else {
-			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
-		}
-		return
-	}
-
 	session, err := models.Sessions(
-		models.SessionWhere.UserID.EQ(userID),
+		models.SessionWhere.GatewayFeed.EQ(null.StringFrom(id)),
 		models.SessionWhere.RemovedAt.IsNull(),
 		qm.OrderBy(fmt.Sprintf("%s desc", models.SessionColumns.UpdatedAt)),
 		qm.Load(models.SessionRels.User),
@@ -688,10 +675,13 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 	}
 
 	if room.R.Sessions != nil {
-		sessions := make(map[int64]*models.Session)
+		sessions := make(map[string]*models.Session)
 		for _, session := range room.R.Sessions {
-			if s, ok := sessions[session.UserID]; ok {
-				// take most active session for user
+			key := session.GatewayFeed.String
+			if key == "" {
+				key = fmt.Sprintf("uid:%d", session.UserID)
+			}
+			if s, ok := sessions[key]; ok {
 				tsA := s.CreatedAt
 				if s.UpdatedAt.Valid {
 					tsA = s.UpdatedAt.Time
@@ -702,10 +692,10 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 					tsB = session.UpdatedAt.Time
 				}
 				if tsA.Before(tsB) {
-					sessions[session.UserID] = session
+					sessions[key] = session
 				}
 			} else {
-				sessions[session.UserID] = session
+				sessions[key] = session
 			}
 		}
 
