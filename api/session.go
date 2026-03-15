@@ -291,6 +291,10 @@ func WrappingProtocolError(err error, msg string) *ProtocolError {
 }
 
 func (sm *V1SessionManager) makeSession(userID int64, user *V1User) (*models.Session, error) {
+	if user.RFID == "" {
+		return nil, NewProtocolError("Empty RFID")
+	}
+
 	room, ok := sm.cache.rooms.ByGatewayUID(user.Room)
 	if !ok {
 		return nil, NewProtocolError(fmt.Sprintf("Unknown room: %s", user.Room))
