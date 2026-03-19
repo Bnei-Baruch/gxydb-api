@@ -8,6 +8,7 @@ import (
 
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"github.com/volatiletech/sqlboiler/boil"
 	"github.com/volatiletech/sqlboiler/queries"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
@@ -294,12 +295,18 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 	return selectedServer
 }
 
-// UpdateLastUsed updates the last_used_at timestamp for a room assignment
-func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID string) error {
+// UpdateLastUsed updates the last_used_at timestamp for a room assignment.
+// Accepts an optional executor (e.g. *sql.Tx) to reuse the caller's transaction
+// and avoid acquiring a second connection from the pool (which can deadlock).
+func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID string, exec ...boil.Executor) error {
+	var e boil.Executor = m.db
+	if len(exec) > 0 && exec[0] != nil {
+		e = exec[0]
+	}
 	_, err := queries.Raw(
 		"UPDATE room_server_assignments SET last_used_at = $1 WHERE room_id = $2",
 		time.Now().UTC(), roomID,
-	).Exec(m.db)
+	).Exec(e)
 
 	if err != nil {
 		return pkgerr.Wrap(err, "update last_used_at")
@@ -312,12 +319,14 @@ func (m *RoomServerAssignmentManager) UpdateLastUsed(ctx context.Context, roomID
 // Uses the same "active session" criteria as PeriodicSessionCleaner:
 //   - removed_at IS NULL
 //   - updated_at >= NOW() - DeadSessionPeriod
-func (m *RoomServerAssignmentManager) CleanInactiveAssignments(ctx context.Context) error {
-	// Calculate the cutoff time using the same logic as PeriodicSessionCleaner
+func (m *RoomServerAssignmentManager) CleanInactiveAssignments(ctx context.Context, exec ...boil.Executor) error {
+	var e boil.Executor = m.db
+	if len(exec) > 0 && exec[0] != nil {
+		e = exec[0]
+	}
+
 	cutoffTime := time.Now().Add(-common.Config.DeadSessionPeriod)
 
-	// Delete assignments where there are no ACTIVE sessions in the room
-	// Active = removed_at IS NULL AND updated_at >= cutoff
 	res, err := queries.Raw(`
 		DELETE FROM room_server_assignments rsa
 		WHERE NOT EXISTS (
@@ -326,7 +335,7 @@ func (m *RoomServerAssignmentManager) CleanInactiveAssignments(ctx context.Conte
 			AND s.removed_at IS NULL
 			AND s.updated_at >= $1
 		)
-	`, cutoffTime).Exec(m.db)
+	`, cutoffTime).Exec(e)
 
 	if err != nil {
 		return pkgerr.Wrap(err, "clean inactive assignments")

@@ -263,9 +263,9 @@ func (sm *V1SessionManager) upsertSession(ctx context.Context, tx *sql.Tx, user 
 		return pkgerr.Wrap(err, "db upsert")
 	}
 
-	// Update last_used_at for room server assignment
+	// Update last_used_at for room server assignment (use tx to avoid pool deadlock)
 	if sm.roomServerAssignmentManager != nil && session.RoomID.Valid {
-		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.String); err != nil {
+		if err := sm.roomServerAssignmentManager.UpdateLastUsed(ctx, session.RoomID.String, tx); err != nil {
 			log.Ctx(ctx).Error().Err(err).Msg("Failed to update room server assignment last_used_at")
 		}
 	}
@@ -419,7 +419,7 @@ func (psc *PeriodicSessionCleaner) clean() {
 		}
 
 		if psc.roomServerAssignmentManager != nil {
-			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx); err != nil {
+			if err := psc.roomServerAssignmentManager.CleanInactiveAssignments(ctx, tx); err != nil {
 				return pkgerr.Wrap(err, "clean inactive assignments")
 			}
 		}
