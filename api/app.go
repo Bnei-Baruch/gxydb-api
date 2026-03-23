@@ -189,6 +189,7 @@ func (a *App) initRoutes() {
 	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminGetRoom).Methods("GET")
 	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminUpdateRoom).Methods("PUT")
 	a.Router.HandleFunc("/admin/rooms/{id}", a.AdminDeleteRoom).Methods("DELETE")
+	a.Router.HandleFunc("/admin/sessions", a.AdminListSessions).Methods("GET")
 	a.Router.HandleFunc("/admin/rooms_statistics", a.AdminDeleteRoomsStatistics).Methods("DELETE")
 	a.Router.HandleFunc("/admin/dynamic_config", a.AdminListDynamicConfigs).Methods("GET")
 	a.Router.HandleFunc("/admin/dynamic_config", a.AdminCreateDynamicConfig).Methods("POST")

@@ -1022,3 +1022,95 @@ type GatewaysResponse struct {
 	ListResponse
 	Gateways []*GatewayDTO `json:"data"`
 }
+
+type SessionsResponse struct {
+	ListResponse
+	Sessions []*V1User `json:"data"`
+}
+
+func (a *App) AdminListSessions(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	query := r.URL.Query()
+	listParams, err := ParseListParams(query)
+	if err != nil {
+		httputil.NewBadRequestError(err, "malformed list parameters").Abort(w, r)
+		return
+	}
+
+	mods := []qm.QueryMod{
+		models.SessionWhere.RemovedAt.IsNull(),
+		qm.Load(models.SessionRels.User),
+		qm.Load(models.SessionRels.Room),
+	}
+
+	// filters
+	if roomID := query.Get("room_id"); roomID != "" {
+		mods = append(mods, models.SessionWhere.RoomID.EQ(null.StringFrom(roomID)))
+	}
+	if gatewayID := query.Get("gateway_id"); gatewayID != "" {
+		val, err := strconv.ParseInt(gatewayID, 10, 64)
+		if err != nil {
+			httputil.NewBadRequestError(err, "gateway_id is not an integer").Abort(w, r)
+			return
+		}
+		mods = append(mods, models.SessionWhere.GatewayID.EQ(null.Int64From(val)))
+	}
+	if camera := query.Get("camera"); camera != "" {
+		mods = append(mods, models.SessionWhere.Camera.EQ(camera == "true"))
+	}
+	if question := query.Get("question"); question != "" {
+		mods = append(mods, models.SessionWhere.Question.EQ(question == "true"))
+	}
+	if display := query.Get("display"); display != "" {
+		mods = append(mods, qm.Where("display ~* ?", display))
+	}
+	if gatewayFeed := query.Get("gateway_feed"); gatewayFeed != "" {
+		mods = append(mods, models.SessionWhere.GatewayFeed.EQ(null.StringFrom(gatewayFeed)))
+	}
+	if ipAddress := query.Get("ip_address"); ipAddress != "" {
+		mods = append(mods, models.SessionWhere.IPAddress.EQ(null.StringFrom(ipAddress)))
+	}
+
+	// count query
+	var total int64
+	countMods := append([]qm.QueryMod{qm.Select("count(DISTINCT id)")}, mods...)
+	err = models.Sessions(countMods...).QueryRow(a.DB).Scan(&total)
+	if err != nil {
+		httputil.NewInternalError(err).Abort(w, r)
+		return
+	} else if total == 0 {
+		httputil.RespondWithJSON(w, http.StatusOK, SessionsResponse{Sessions: make([]*V1User, 0)})
+		return
+	}
+
+	// order, limit, offset
+	listParams.GroupBy = models.SessionColumns.ID
+	_, offset := listParams.appendListMods(&mods)
+	if int64(offset) >= total {
+		httputil.RespondWithJSON(w, http.StatusOK, SessionsResponse{Sessions: make([]*V1User, 0)})
+		return
+	}
+
+	// data query
+	sessions, err := models.Sessions(mods...).All(a.DB)
+	if err != nil {
+		httputil.NewInternalError(err).Abort(w, r)
+		return
+	}
+
+	data := make([]*V1User, len(sessions))
+	for i, session := range sessions {
+		data[i] = a.makeV1User(session.R.Room, session)
+	}
+
+	httputil.RespondWithJSON(w, http.StatusOK, SessionsResponse{
+		ListResponse: ListResponse{
+			Total: total,
+		},
+		Sessions: data,
+	})
+}
