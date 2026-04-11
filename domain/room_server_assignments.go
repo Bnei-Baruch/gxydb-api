@@ -67,7 +67,48 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 	).QueryRow(m.db).Scan(&existingGatewayName)
 
 	if err == nil {
-		// Assignment exists, update last_used_at (sticky routing - ignore countryCode)
+		// Assignment exists - check if the assigned server is still online
+		if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(existingGatewayName) {
+			log.Ctx(ctx).Warn().
+				Str("room_id", roomID).
+				Str("offline_server", existingGatewayName).
+				Msg("Assigned server is offline - reassigning room")
+
+			serverLoads, loadErr := m.getServerLoads(ctx)
+			if loadErr != nil {
+				log.Ctx(ctx).Error().Err(loadErr).Msg("Failed to get server loads for reassignment")
+				return existingGatewayName, nil
+			}
+
+			preferredServers := m.getPreferredServers(countryCode)
+			reservedServers := m.getReservedServers(countryCode)
+			newServer := m.selectLeastLoadedServer(serverLoads, preferredServers, reservedServers)
+
+			if newServer != "" && newServer != existingGatewayName {
+				// Optimistic update: only change if no concurrent failover has already reassigned
+				_, updateErr := queries.Raw(
+					"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
+					newServer, time.Now().UTC(), roomID, existingGatewayName,
+				).Exec(m.db)
+				if updateErr != nil {
+					log.Ctx(ctx).Error().Err(updateErr).Msg("Failed to update room reassignment")
+				} else {
+					log.Ctx(ctx).Info().
+						Str("room_id", roomID).
+						Str("old_server", existingGatewayName).
+						Str("new_server", newServer).
+						Msg("Room reassigned from offline server")
+					return newServer, nil
+				}
+			} else {
+				log.Ctx(ctx).Error().
+					Str("room_id", roomID).
+					Str("offline_server", existingGatewayName).
+					Msg("No online servers available for reassignment")
+			}
+		}
+
+		// Server is online (or reassignment failed) - sticky routing
 		_, err = queries.Raw(
 			"UPDATE room_server_assignments SET last_used_at = $1 WHERE room_id = $2",
 			time.Now().UTC(), roomID,
@@ -198,18 +239,16 @@ func (m *RoomServerAssignmentManager) getServerLoads(ctx context.Context) (map[s
 	return loads, nil
 }
 
-// selectLeastLoadedServer picks the server to fill sequentially
-// Strategy: fill servers one by one to maxServerCapacity, then move to next
-// If preferredServers is provided, it will try to select from those first
-// reservedServers are excluded from selection (unless all non-reserved are at capacity)
+// selectLeastLoadedServer picks the online server with the least load.
+// If preferredServers is provided, it will try to select from those first.
+// reservedServers are excluded from selection (unless all non-reserved are at capacity).
 func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]int, preferredServers []string, reservedServers map[string]bool) string {
 	var selectedServer string
-	maxLoad := -1
+	minLoad := -1
 
 	// First, try to select from preferred servers (regional)
 	if len(preferredServers) > 0 {
 		for _, server := range preferredServers {
-			// Check if server is in available list
 			found := false
 			for _, availServer := range m.availableServers {
 				if availServer == server {
@@ -221,67 +260,59 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 				continue
 			}
 
-			// Skip offline servers
 			if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(server) {
 				continue
 			}
 
 			load := loads[server]
-			// Check if server has capacity for one more room
 			if load+m.avgRoomOccupancy > m.maxServerCapacity {
 				continue
 			}
 
-			// Select server with MAXIMUM load (to fill it first)
-			if maxLoad == -1 || load > maxLoad {
-				maxLoad = load
+			if minLoad == -1 || load < minLoad {
+				minLoad = load
 				selectedServer = server
 			}
 		}
 
-		// If we found a regional server, use it
 		if selectedServer != "" {
 			return selectedServer
 		}
 	}
 
 	// No preferred servers or all are at capacity - select from non-reserved servers
-	maxLoad = -1
+	minLoad = -1
 	for _, server := range m.availableServers {
-		// Skip servers reserved for other regions
 		if reservedServers[server] {
 			continue
 		}
 
-		// Skip offline servers
 		if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(server) {
 			continue
 		}
 
 		load := loads[server]
-		// Check if server has capacity for one more room
 		if load+m.avgRoomOccupancy > m.maxServerCapacity {
 			continue
 		}
 
-		// Select server with MAXIMUM load (to fill it first)
-		if maxLoad == -1 || load > maxLoad {
-			maxLoad = load
+		if minLoad == -1 || load < minLoad {
+			minLoad = load
 			selectedServer = server
 		}
 	}
 
-	// If we found a non-reserved server, use it
 	if selectedServer != "" {
 		return selectedServer
 	}
 
-	// All non-reserved servers are at capacity
-	// Final fallback: select least loaded non-reserved server (ignoring capacity check)
-	minLoad := -1
+	// All non-reserved servers are at capacity - fallback to least loaded online server
+	minLoad = -1
 	for _, server := range m.availableServers {
-		// Still skip servers reserved for other regions
 		if reservedServers[server] {
+			continue
+		}
+		if m.statusChecker != nil && !m.statusChecker.IsGatewayOnline(server) {
 			continue
 		}
 
