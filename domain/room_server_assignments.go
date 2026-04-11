@@ -86,19 +86,32 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 
 			if newServer != "" && newServer != existingGatewayName {
 				// Optimistic update: only change if no concurrent failover has already reassigned
-				_, updateErr := queries.Raw(
+				result, updateErr := queries.Raw(
 					"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
 					newServer, time.Now().UTC(), roomID, existingGatewayName,
 				).Exec(m.db)
 				if updateErr != nil {
 					log.Ctx(ctx).Error().Err(updateErr).Msg("Failed to update room reassignment")
-				} else {
+				} else if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
 					log.Ctx(ctx).Info().
 						Str("room_id", roomID).
 						Str("old_server", existingGatewayName).
 						Str("new_server", newServer).
 						Msg("Room reassigned from offline server")
 					return newServer, nil
+				} else {
+					// Another request already reassigned this room — read current value
+					var currentGateway string
+					if readErr := queries.Raw(
+						"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
+						roomID,
+					).QueryRow(m.db).Scan(&currentGateway); readErr == nil {
+						log.Ctx(ctx).Debug().
+							Str("room_id", roomID).
+							Str("current_server", currentGateway).
+							Msg("Room already reassigned by concurrent request")
+						return currentGateway, nil
+					}
 				}
 			} else {
 				log.Ctx(ctx).Error().
