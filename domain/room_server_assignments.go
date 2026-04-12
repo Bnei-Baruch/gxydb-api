@@ -336,6 +336,21 @@ func (m *RoomServerAssignmentManager) selectLeastLoadedServer(loads map[string]i
 		}
 	}
 
+	if selectedServer != "" {
+		return selectedServer
+	}
+
+	// No online servers found (e.g. status data not yet available after restart).
+	// Last resort: pick least loaded server ignoring online status.
+	minLoad = -1
+	for _, server := range m.availableServers {
+		load := loads[server]
+		if minLoad == -1 || load < minLoad {
+			minLoad = load
+			selectedServer = server
+		}
+	}
+
 	return selectedServer
 }
 
