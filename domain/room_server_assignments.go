@@ -117,12 +117,29 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 						log.Ctx(ctx).Warn().
 							Str("room_id", roomID).
 							Str("current_server", currentGateway).
-							Msg("Concurrent reassignment still points to offline server - using our selection")
-						queries.Raw(
-							"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3",
-							newServer, time.Now().UTC(), roomID,
+							Str("new_server", newServer).
+							Msg("Concurrent reassignment still points to offline server - attempting force reassign")
+						forceResult, forceErr := queries.Raw(
+							"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
+							newServer, time.Now().UTC(), roomID, currentGateway,
 						).Exec(m.db)
-						return newServer, nil
+						if forceErr == nil {
+							if forceRows, _ := forceResult.RowsAffected(); forceRows > 0 {
+								return newServer, nil
+							}
+						}
+						// Another force-write won the race — re-read final value
+						var finalGateway string
+						if finalErr := queries.Raw(
+							"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
+							roomID,
+						).QueryRow(m.db).Scan(&finalGateway); finalErr == nil {
+							log.Ctx(ctx).Info().
+								Str("room_id", roomID).
+								Str("final_server", finalGateway).
+								Msg("Using server from concurrent force-write")
+							return finalGateway, nil
+						}
 					}
 				}
 			} else {
