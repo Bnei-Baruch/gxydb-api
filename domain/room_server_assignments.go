@@ -134,6 +134,10 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 		}
 
 		// Server is online (or reassignment failed) - sticky routing
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).
+			Str("gateway", existingGatewayName).
+			Msg("Sticky routing - returning existing assignment")
 		_, err = queries.Raw(
 			"UPDATE room_server_assignments SET last_used_at = $1 WHERE room_id = $2",
 			time.Now().UTC(), roomID,

@@ -167,6 +167,11 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	log.Ctx(r.Context()).Info().
+		Str("room", req.Room).
+		Str("janus", gatewayName).
+		Msg("V2GetRoomServer response")
+
 	httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
 		Janus: gatewayName,
 	})
