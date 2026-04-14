@@ -85,62 +85,8 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 			newServer := m.selectLeastLoadedServer(serverLoads, preferredServers, reservedServers)
 
 			if newServer != "" && newServer != existingGatewayName {
-				// Optimistic update: only change if no concurrent failover has already reassigned
-				result, updateErr := queries.Raw(
-					"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
-					newServer, time.Now().UTC(), roomID, existingGatewayName,
-				).Exec(m.db)
-				if updateErr != nil {
-					log.Ctx(ctx).Error().Err(updateErr).Msg("Failed to update room reassignment")
-				} else if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
-					log.Ctx(ctx).Info().
-						Str("room_id", roomID).
-						Str("old_server", existingGatewayName).
-						Str("new_server", newServer).
-						Msg("Room reassigned from offline server")
-					return newServer, nil
-				} else {
-					// Another request already reassigned this room — read current value
-					var currentGateway string
-					if readErr := queries.Raw(
-						"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
-						roomID,
-					).QueryRow(m.db).Scan(&currentGateway); readErr == nil {
-						// Only return if the reassigned server is actually online
-						if m.statusChecker == nil || m.statusChecker.IsGatewayOnline(currentGateway) {
-							log.Ctx(ctx).Debug().
-								Str("room_id", roomID).
-								Str("current_server", currentGateway).
-								Msg("Room already reassigned by concurrent request")
-							return currentGateway, nil
-						}
-						log.Ctx(ctx).Warn().
-							Str("room_id", roomID).
-							Str("current_server", currentGateway).
-							Str("new_server", newServer).
-							Msg("Concurrent reassignment still points to offline server - attempting force reassign")
-						forceResult, forceErr := queries.Raw(
-							"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
-							newServer, time.Now().UTC(), roomID, currentGateway,
-						).Exec(m.db)
-						if forceErr == nil {
-							if forceRows, _ := forceResult.RowsAffected(); forceRows > 0 {
-								return newServer, nil
-							}
-						}
-						// Another force-write won the race — re-read final value
-						var finalGateway string
-						if finalErr := queries.Raw(
-							"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
-							roomID,
-						).QueryRow(m.db).Scan(&finalGateway); finalErr == nil {
-							log.Ctx(ctx).Info().
-								Str("room_id", roomID).
-								Str("final_server", finalGateway).
-								Msg("Using server from concurrent force-write")
-							return finalGateway, nil
-						}
-					}
+				if result, err := m.reassignRoom(ctx, roomID, existingGatewayName, newServer); result != "" {
+					return result, err
 				}
 			} else {
 				log.Ctx(ctx).Error().
@@ -214,6 +160,139 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 		Msg("Assigned room to server")
 
 	return gatewayName, nil
+}
+
+// reassignRoom atomically reassigns a room from oldServer to newServer.
+// Uses a transaction so pgpool routes all queries (including SELECTs) to the primary node,
+// avoiding stale reads from replicas due to replication lag.
+func (m *RoomServerAssignmentManager) reassignRoom(ctx context.Context, roomID, oldServer, newServer string) (string, error) {
+	sqlDB, ok := m.db.(*sql.DB)
+	if !ok {
+		if executor, ok2 := m.db.(boil.Beginner); ok2 {
+			return m.reassignRoomWithBeginner(ctx, roomID, oldServer, newServer, executor)
+		}
+		log.Ctx(ctx).Error().Msg("DB does not support transactions - falling back to non-transactional reassign")
+		return m.reassignRoomDirect(ctx, roomID, oldServer, newServer)
+	}
+
+	tx, txErr := sqlDB.BeginTx(ctx, nil)
+	if txErr != nil {
+		log.Ctx(ctx).Error().Err(txErr).Msg("Failed to begin transaction for reassignment")
+		return m.reassignRoomDirect(ctx, roomID, oldServer, newServer)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+
+	// All queries in this tx go to primary (pgpool routes tx with writes to primary)
+	result, err := tx.ExecContext(ctx,
+		"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
+		newServer, now, roomID, oldServer)
+	if err != nil {
+		log.Ctx(ctx).Error().Err(err).Msg("Failed to update room reassignment")
+		return "", nil
+	}
+
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
+		if commitErr := tx.Commit(); commitErr != nil {
+			log.Ctx(ctx).Error().Err(commitErr).Msg("Failed to commit reassignment")
+			return "", nil
+		}
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).
+			Str("old_server", oldServer).
+			Str("new_server", newServer).
+			Msg("Room reassigned from offline server")
+		return newServer, nil
+	}
+
+	// Another request beat us — read current value FROM PRIMARY (same tx)
+	var currentGateway string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
+		roomID).Scan(&currentGateway); err != nil {
+		log.Ctx(ctx).Error().Err(err).Msg("Failed to read current assignment in tx")
+		return "", nil
+	}
+	tx.Commit()
+
+	if m.statusChecker == nil || m.statusChecker.IsGatewayOnline(currentGateway) {
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).
+			Str("current_server", currentGateway).
+			Msg("Room already reassigned by concurrent request")
+		return currentGateway, nil
+	}
+
+	// Current server is still offline — force reassign in a new tx
+	log.Ctx(ctx).Warn().
+		Str("room_id", roomID).
+		Str("current_server", currentGateway).
+		Str("new_server", newServer).
+		Msg("Concurrent reassignment still points to offline server - force reassign")
+	return m.reassignRoom(ctx, roomID, currentGateway, newServer)
+}
+
+func (m *RoomServerAssignmentManager) reassignRoomWithBeginner(ctx context.Context, roomID, oldServer, newServer string, beginner boil.Beginner) (string, error) {
+	tx, err := beginner.Begin()
+	if err != nil {
+		return m.reassignRoomDirect(ctx, roomID, oldServer, newServer)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	result, err := queries.Raw(
+		"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
+		newServer, now, roomID, oldServer).Exec(tx)
+	if err != nil {
+		return "", nil
+	}
+
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
+		tx.Commit()
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).Str("old_server", oldServer).Str("new_server", newServer).
+			Msg("Room reassigned from offline server")
+		return newServer, nil
+	}
+
+	var currentGateway string
+	if err := queries.Raw(
+		"SELECT gateway_name FROM room_server_assignments WHERE room_id = $1",
+		roomID).QueryRow(tx).Scan(&currentGateway); err != nil {
+		return "", nil
+	}
+	tx.Commit()
+
+	if m.statusChecker == nil || m.statusChecker.IsGatewayOnline(currentGateway) {
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).Str("current_server", currentGateway).
+			Msg("Room already reassigned by concurrent request")
+		return currentGateway, nil
+	}
+
+	log.Ctx(ctx).Warn().
+		Str("room_id", roomID).Str("current_server", currentGateway).Str("new_server", newServer).
+		Msg("Concurrent reassignment still points to offline server - force reassign")
+	return m.reassignRoom(ctx, roomID, currentGateway, newServer)
+}
+
+// reassignRoomDirect is a fallback without transactions
+func (m *RoomServerAssignmentManager) reassignRoomDirect(ctx context.Context, roomID, oldServer, newServer string) (string, error) {
+	now := time.Now().UTC()
+	result, err := queries.Raw(
+		"UPDATE room_server_assignments SET gateway_name = $1, last_used_at = $2 WHERE room_id = $3 AND gateway_name = $4",
+		newServer, now, roomID, oldServer).Exec(m.db)
+	if err != nil {
+		return "", nil
+	}
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
+		log.Ctx(ctx).Info().
+			Str("room_id", roomID).Str("old_server", oldServer).Str("new_server", newServer).
+			Msg("Room reassigned from offline server")
+		return newServer, nil
+	}
+	return "", nil
 }
 
 // getPreferredServers returns list of servers for the given country code
