@@ -137,6 +137,19 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 	var gatewayName string
 	var err error
 
+	// Pinned rooms (SERVER_ROOMS): if the room is in the static pinned list,
+	// return the configured server immediately, bypassing both legacy and scale flows.
+	if pinned, ok := common.Config.ServerRooms[room.GatewayUID]; ok && pinned != "" {
+		log.Ctx(r.Context()).Info().
+			Str("room", req.Room).
+			Str("janus", pinned).
+			Msg("V2GetRoomServer pinned response (SERVER_ROOMS)")
+		httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
+			Janus: pinned,
+		})
+		return
+	}
+
 	// Check mode: legacy (use default gateway) or scale (load balancing)
 	if !common.Config.ScaleMode {
 		// Legacy mode: return room's default gateway

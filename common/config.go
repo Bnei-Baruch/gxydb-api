@@ -37,6 +37,7 @@ type config struct {
 	MaxServerCapacity     int
 	AvgRoomOccupancy      int
 	ServerRegions         map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
+	ServerRooms           map[string]string   // room (gateway_uid) -> pinned server name (e.g., "1234" -> "gxy5")
 	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
 	FailoverJanusServers  []string
 	FailoverWaitTime      time.Duration
@@ -71,6 +72,7 @@ func newConfig() *config {
 		MaxServerCapacity:     400,
 		AvgRoomOccupancy:      10,
 		ServerRegions:         make(map[string][]string),
+		ServerRooms:           make(map[string]string),
 		ScaleMode:             false, // default: use room's default gateway (legacy mode)
 		FailoverJanusServers:  []string{},
 		FailoverWaitTime:      5 * time.Second,
@@ -214,6 +216,30 @@ func Init() {
 					servers[i] = strings.TrimSpace(servers[i])
 				}
 				Config.ServerRegions[countryCode] = servers
+			}
+		}
+	}
+	// Parse SERVER_ROOMS: format "1234,1235,1236:gxy5;2000,2001:gxy6"
+	// Pinned room->server assignments: rooms listed here are always routed to the
+	// specified server, bypassing the standard assignment flow.
+	if val := os.Getenv("SERVER_ROOMS"); val != "" {
+		groups := strings.Split(val, ";")
+		for _, group := range groups {
+			parts := strings.Split(group, ":")
+			if len(parts) != 2 {
+				continue
+			}
+			server := strings.TrimSpace(parts[1])
+			if server == "" {
+				continue
+			}
+			rooms := strings.Split(parts[0], ",")
+			for _, room := range rooms {
+				room = strings.TrimSpace(room)
+				if room == "" {
+					continue
+				}
+				Config.ServerRooms[room] = server
 			}
 		}
 	}
