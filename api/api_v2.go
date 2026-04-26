@@ -138,14 +138,21 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	// Pinned rooms (SERVER_ROOMS): if the room is in the static pinned list,
-	// return the configured server immediately, bypassing both legacy and scale flows.
+	// the configured server always wins, bypassing both legacy and scale-mode
+	// selection logic. The assignment is still recorded in room_server_assignments
+	// so the rest of the system (rooms listing, load accounting) stays in sync.
 	if pinned, ok := common.Config.ServerRooms[room.GatewayUID]; ok && pinned != "" {
+		gatewayName, err = a.roomServerAssignmentManager.AssignPinnedServer(r.Context(), room.GatewayUID, pinned)
+		if err != nil {
+			httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+			return
+		}
 		log.Ctx(r.Context()).Info().
 			Str("room", req.Room).
-			Str("janus", pinned).
+			Str("janus", gatewayName).
 			Msg("V2GetRoomServer pinned response (SERVER_ROOMS)")
 		httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
-			Janus: pinned,
+			Janus: gatewayName,
 		})
 		return
 	}

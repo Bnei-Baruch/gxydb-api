@@ -162,6 +162,35 @@ func (m *RoomServerAssignmentManager) GetOrAssignServer(ctx context.Context, roo
 	return gatewayName, nil
 }
 
+// AssignPinnedServer upserts a room->server assignment for a statically pinned room
+// (configured via SERVER_ROOMS). Unlike GetOrAssignServer, it doesn't perform any
+// load/online checks - the configured server always wins. If a different assignment
+// already exists for the room, gateway_name is overwritten so the table stays in sync
+// with the current SERVER_ROOMS configuration.
+func (m *RoomServerAssignmentManager) AssignPinnedServer(ctx context.Context, roomID, server string) (string, error) {
+	now := time.Now().UTC()
+
+	var gatewayName string
+	err := queries.Raw(`
+		INSERT INTO room_server_assignments (room_id, gateway_name, region, assigned_at, last_used_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (room_id)
+		DO UPDATE SET gateway_name = EXCLUDED.gateway_name, last_used_at = EXCLUDED.last_used_at
+		RETURNING gateway_name
+	`, roomID, server, "pinned", now, now).QueryRow(m.db).Scan(&gatewayName)
+
+	if err != nil {
+		return "", pkgerr.Wrap(err, "upsert pinned room assignment")
+	}
+
+	log.Ctx(ctx).Info().
+		Str("room_id", roomID).
+		Str("gateway_name", gatewayName).
+		Msg("Pinned room assigned to server (SERVER_ROOMS)")
+
+	return gatewayName, nil
+}
+
 // reassignRoom atomically reassigns a room from oldServer to newServer.
 // Uses a transaction so pgpool routes all queries (including SELECTs) to the primary node,
 // avoiding stale reads from replicas due to replication lag.
