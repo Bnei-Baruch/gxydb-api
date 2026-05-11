@@ -152,6 +152,39 @@ func (s *ApiTestSuite) TestListGroupsWithNumUsers() {
 	}
 }
 
+func (s *ApiTestSuite) TestNumUsersCountsConnectionsPerSession() {
+	// Two active sessions of the same user in the same room must count as 2
+	// in both /groups?with_num_users=true and /room/{id} (and len(users) too).
+	gateway := s.CreateGateway()
+	room := s.CreateRoom(gateway)
+	user := s.CreateUser()
+	s.CreateSession(user, gateway, room)
+	s.CreateSession(user, gateway, room)
+	s.Require().NoError(s.app.cache.ReloadAll(s.DB))
+
+	// /groups?with_num_users=true
+	req, _ := http.NewRequest("GET", "/groups?with_num_users=true", nil)
+	s.apiAuth(req)
+	body := s.request200json(req)
+	respRooms, ok := body["rooms"].([]interface{})
+	s.Require().True(ok, "rooms is array")
+	s.Require().Equal(1, len(respRooms), "group count")
+	groupData := respRooms[0].(map[string]interface{})
+	s.EqualValues(2, groupData["num_users"], "groups num_users counts both sessions")
+
+	// /room/{id}
+	req, _ = http.NewRequest("GET", fmt.Sprintf("/room/%s", room.GatewayUID), nil)
+	s.apiAuth(req)
+	roomBody := s.request200json(req)
+	s.Equal(2, int(roomBody["num_users"].(float64)), "room num_users counts both sessions")
+	users, ok := roomBody["users"].([]interface{})
+	s.Require().True(ok, "users is array")
+	s.Equal(2, len(users), "len(users) matches num_users")
+	for _, u := range users {
+		s.Equal(user.AccountsID, u.(map[string]interface{})["id"], "both entries belong to the same user")
+	}
+}
+
 func (s *ApiTestSuite) TestCreateGroupMalformedID() {
 	req, _ := http.NewRequest("PUT", "/group/id", nil)
 	s.apiAuthP(req, []string{common.RoleRoot})

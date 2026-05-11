@@ -29,10 +29,10 @@ func (a *App) V1ListGroups(w http.ResponseWriter, r *http.Request) {
 
 	roomCounts := make(map[string]int64)
 	if withNumUsers := params.Get("with_num_users"); withNumUsers == "true" {
-		// fetch num_users for each room from sessions table.
-		// we distinct by user_id as we do in every other place (makeV1Room)
+		// num_users is the number of active sessions (connections) per room.
+		// no dedup: two sessions of the same user count as 2 (matches makeV1Room).
 		rows, err := models.Sessions(
-			qm.Select(models.SessionColumns.RoomID, "count(distinct user_id) as num_users"),
+			qm.Select(models.SessionColumns.RoomID, "count(*) as num_users"),
 			models.SessionWhere.RemovedAt.IsNull(),
 			qm.GroupBy(models.SessionColumns.RoomID),
 		).Query.Query(a.DB)
@@ -675,34 +675,11 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 	}
 
 	if room.R.Sessions != nil {
-		sessions := make(map[string]*models.Session)
-		for _, session := range room.R.Sessions {
-			key := session.GatewayFeed.String
-			if key == "" {
-				key = fmt.Sprintf("uid:%d", session.UserID)
-			}
-			if s, ok := sessions[key]; ok {
-				tsA := s.CreatedAt
-				if s.UpdatedAt.Valid {
-					tsA = s.UpdatedAt.Time
-				}
-
-				tsB := session.CreatedAt
-				if session.UpdatedAt.Valid {
-					tsB = session.UpdatedAt.Time
-				}
-				if tsA.Before(tsB) {
-					sessions[key] = session
-				}
-			} else {
-				sessions[key] = session
-			}
-		}
-
-		respRoom.NumUsers = len(sessions)
+		// num_users / users is one entry per active session (connection).
+		// no dedup: two sessions of the same user count as 2.
+		respRoom.NumUsers = len(room.R.Sessions)
 		respRoom.Users = make([]*V1User, respRoom.NumUsers)
-		i := 0
-		for _, session := range sessions {
+		for i, session := range room.R.Sessions {
 			if session.Question {
 				respRoom.Questions = true
 			}
@@ -710,7 +687,6 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 				respRoom.firstSessionInRoom = session.CreatedAt
 			}
 			respRoom.Users[i] = a.makeV1User(room, session)
-			i++
 		}
 	}
 
