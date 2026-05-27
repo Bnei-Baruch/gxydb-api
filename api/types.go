@@ -66,6 +66,7 @@ type V1Room struct {
 	V1RoomInfo
 	Questions          bool                   `json:"questions"`
 	NumUsers           int                    `json:"num_users"`
+	CamUsers           int                    `json:"cam_users"`
 	Users              []*V1User              `json:"users"`
 	Region             string                 `json:"region"`
 	Extra              map[string]interface{} `json:"extra"`

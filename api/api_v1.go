@@ -683,6 +683,9 @@ func (a *App) makeV1Room(room *models.Room, gateway *models.Gateway) *V1Room {
 			if session.Question {
 				respRoom.Questions = true
 			}
+			if session.Camera {
+				respRoom.CamUsers++
+			}
 			if respRoom.firstSessionInRoom.IsZero() || respRoom.firstSessionInRoom.After(session.CreatedAt) {
 				respRoom.firstSessionInRoom = session.CreatedAt
 			}
