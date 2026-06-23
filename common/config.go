@@ -32,7 +32,7 @@ type config struct {
 	MQTTPassword          string
 	MQTTSecure            bool
 	VHUrl                 string
-	LogLevel              string              // Log level: trace, debug, info, warn, error (default: info)
+	LogLevel              string // Log level: trace, debug, info, warn, error (default: info)
 	AvailableJanusServers []string
 	MaxServerCapacity     int
 	AvgRoomOccupancy      int
@@ -41,9 +41,9 @@ type config struct {
 	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
 	FailoverJanusServers  []string
 	FailoverWaitTime      time.Duration
-	StrJanusServers       []string            // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
-	Mode                  string              // application mode: "galaxy" (default) or "webinar"
-	WebinarUsersCount     int                 // max users (active sessions) per webinar room
+	StrJanusServers       []string // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
+	Mode                  string   // application mode: "galaxy" (default) or "webinar"
+	WebinarUsersCount     int      // max users (active sessions) per webinar room
 }
 
 func newConfig() *config {

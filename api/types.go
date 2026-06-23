@@ -45,6 +45,19 @@ type V2WebinarRoomServerResponse struct {
 	Room  string `json:"room"` // Janus room ID (gateway_uid) of the assigned room
 }
 
+// AdminSyncRoomsResult summarizes an /admin/rooms/sync run.
+type AdminSyncRoomsResult struct {
+	Rooms   int                               `json:"rooms"` // number of rooms processed
+	Servers map[string]*AdminSyncServerResult `json:"servers"`
+}
+
+type AdminSyncServerResult struct {
+	Created      int      `json:"created"`       // rooms newly created on this gateway
+	AlreadyExist int      `json:"already_exist"` // rooms that already existed (no-op)
+	Skipped      bool     `json:"skipped"`       // gateway was offline, not touched
+	Errors       []string `json:"errors,omitempty"`
+}
+
 type V1User struct {
 	ID             string                 `json:"id"`
 	Display        string                 `json:"display"`

@@ -294,7 +294,43 @@ func (a *App) createVideoRoomOnGateways(servers []string, gatewayUID, descriptio
 		return
 	}
 
-	request := map[string]interface{}{
+	request := videoRoomCreateRequest(gatewayUID, description)
+
+	var created, alreadyExist, failed, skipped int
+	for _, server := range servers {
+		if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
+			skipped++
+			log.Warn().Str("room", gatewayUID).Str("gateway", server).Msg("create room: skipped offline gateway")
+			continue
+		}
+
+		if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "already exist") {
+				alreadyExist++
+				log.Info().Str("room", gatewayUID).Str("gateway", server).Msg("create room: already exists")
+				continue
+			}
+			failed++
+			log.Error().Err(err).Str("room", gatewayUID).Str("gateway", server).Msg("create room: failed")
+			continue
+		}
+		created++
+		log.Info().Str("room", gatewayUID).Str("gateway", server).Msg("create room: created")
+	}
+
+	log.Info().
+		Str("room", gatewayUID).
+		Int("created", created).
+		Int("already_exist", alreadyExist).
+		Int("failed", failed).
+		Int("skipped_offline", skipped).
+		Msg("create room on gateways: summary")
+}
+
+// videoRoomCreateRequest builds the Janus videoroom "create" request payload
+// shared by room creation and the admin sync endpoint.
+func videoRoomCreateRequest(gatewayUID, description string) map[string]interface{} {
+	return map[string]interface{}{
 		"request":               "create",
 		"room":                  gatewayUID,
 		"description":           description,
@@ -314,17 +350,64 @@ func (a *App) createVideoRoomOnGateways(servers []string, gatewayUID, descriptio
 		"transport_wide_cc_ext": true,
 		"permanent":             true,
 	}
+}
 
-	for _, server := range servers {
+// AdminSyncRooms (re)creates every active room on every available Janus gateway.
+// It is idempotent: rooms that already exist on a gateway report "already exists"
+// (counted separately, not an error). Use it to bring a freshly started / recovered
+// gateway in sync with the rooms table without restarting the service.
+func (a *App) AdminSyncRooms(w http.ResponseWriter, r *http.Request) {
+	if !common.Config.SkipPermissions && !middleware.RequestHasRole(r, common.RoleRoot) {
+		httputil.NewForbiddenError().Abort(w, r)
+		return
+	}
+
+	if a.janusAdmin == nil {
+		httputil.NewInternalError(pkgerr.New("janus admin client not configured (no MQTT)")).Abort(w, r)
+		return
+	}
+
+	rooms, err := models.Rooms(
+		models.RoomWhere.Disabled.EQ(false),
+		models.RoomWhere.RemovedAt.IsNull(),
+	).All(a.DB)
+	if err != nil {
+		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		return
+	}
+
+	result := AdminSyncRoomsResult{
+		Rooms:   len(rooms),
+		Servers: make(map[string]*AdminSyncServerResult, len(common.Config.AvailableJanusServers)),
+	}
+
+	for _, server := range common.Config.AvailableJanusServers {
+		sr := &AdminSyncServerResult{}
+		result.Servers[server] = sr
+
 		if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
-			log.Debug().Str("gateway", server).Msg("skip offline gateway for create room")
+			sr.Skipped = true
+			log.Info().Str("gateway", server).Msg("AdminSyncRooms: skip offline gateway")
 			continue
 		}
 
-		if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
-			log.Error().Err(err).Str("gateway", server).Msg("create room on gateway failed")
+		for _, room := range rooms {
+			request := videoRoomCreateRequest(room.GatewayUID, room.Name)
+			if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "already exist") {
+					sr.AlreadyExist++
+					continue
+				}
+				sr.Errors = append(sr.Errors, fmt.Sprintf("room %s: %s", room.GatewayUID, err.Error()))
+				log.Error().Err(err).Str("gateway", server).Str("room", room.GatewayUID).Msg("AdminSyncRooms: create failed")
+				continue
+			}
+			sr.Created++
 		}
 	}
+
+	log.Ctx(r.Context()).Info().Int("rooms", result.Rooms).Msg("AdminSyncRooms completed")
+	httputil.RespondWithJSON(w, http.StatusOK, result)
 }
 
 func (a *App) AdminGetRoom(w http.ResponseWriter, r *http.Request) {
@@ -429,14 +512,14 @@ func (a *App) AdminUpdateRoom(w http.ResponseWriter, r *http.Request) {
 		// update room in gateways via MQTT
 		if a.janusAdmin != nil {
 			request := map[string]interface{}{
-				"request":     "edit",
-				"room":        data.GatewayUID,
+				"request":         "edit",
+				"room":            data.GatewayUID,
 				"new_description": data.Name,
-				"secret":      common.Config.GatewayRoomsSecret,
-				"new_publishers": 100,
-				"new_bitrate": 64000,
-				"new_fir_freq": 10,
-				"permanent":   true,
+				"secret":          common.Config.GatewayRoomsSecret,
+				"new_publishers":  100,
+				"new_bitrate":     64000,
+				"new_fir_freq":    10,
+				"permanent":       true,
 			}
 
 			for _, server := range common.Config.AvailableJanusServers {
