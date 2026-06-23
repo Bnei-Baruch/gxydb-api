@@ -5,6 +5,12 @@ import "time"
 const GatewayTypeRooms = "rooms"
 const GatewayTypeStreaming = "streaming"
 
+// Application mode (MODE env). Controls room distribution behavior.
+//   - galaxy:  legacy behavior, client picks the room, backend maps room -> server.
+//   - webinar: backend auto-creates/assigns language based rooms with a capacity limit.
+const ModeGalaxy = "galaxy"
+const ModeWebinar = "webinar"
+
 const RoleGuest = "gxy_guest"
 const RoleUser = "gxy_user"
 const RoleShidur = "gxy_shidur"

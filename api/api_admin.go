@@ -263,39 +263,7 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// create room in gateways via MQTT
-		if a.janusAdmin != nil {
-			request := map[string]interface{}{
-				"request":              "create",
-				"room":                 data.GatewayUID,
-				"description":          data.Name,
-				"secret":               common.Config.GatewayRoomsSecret,
-				"publishers":           100,
-				"bitrate":              64000,
-				"fir_freq":             10,
-				"audiocodec":           "opus",
-				"videocodec":           "h264",
-				"h264_profile":         "42e01f",
-				"audiolevel_ext":       true,
-				"audiolevel_event":     true,
-				"audio_active_packets": 25,
-				"audio_level_average":  100,
-				"videoorient_ext":      true,
-				"playoutdelay_ext":     true,
-				"transport_wide_cc_ext": true,
-				"permanent":            true,
-			}
-
-			for _, server := range common.Config.AvailableJanusServers {
-				if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
-					log.Debug().Str("gateway", server).Msg("skip offline gateway for create room")
-					continue
-				}
-
-				if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
-					log.Error().Err(err).Str("gateway", server).Msg("create room on gateway failed")
-				}
-			}
-		}
+		a.createVideoRoomOnGateways(common.Config.AvailableJanusServers, data.GatewayUID, data.Name)
 
 		return nil
 	})
@@ -315,6 +283,48 @@ func (a *App) AdminCreateRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.RespondWithJSON(w, http.StatusCreated, data)
+}
+
+// createVideoRoomOnGateways creates a videoroom (gatewayUID) on every online
+// gateway from the given server list via the Janus Admin API (MQTT). Errors are
+// logged but not fatal: a room missing on a temporarily offline gateway will be
+// (re)created the next time it is needed.
+func (a *App) createVideoRoomOnGateways(servers []string, gatewayUID, description string) {
+	if a.janusAdmin == nil {
+		return
+	}
+
+	request := map[string]interface{}{
+		"request":               "create",
+		"room":                  gatewayUID,
+		"description":           description,
+		"secret":                common.Config.GatewayRoomsSecret,
+		"publishers":            100,
+		"bitrate":               64000,
+		"fir_freq":              10,
+		"audiocodec":            "opus",
+		"videocodec":            "h264",
+		"h264_profile":          "42e01f",
+		"audiolevel_ext":        true,
+		"audiolevel_event":      true,
+		"audio_active_packets":  25,
+		"audio_level_average":   100,
+		"videoorient_ext":       true,
+		"playoutdelay_ext":      true,
+		"transport_wide_cc_ext": true,
+		"permanent":             true,
+	}
+
+	for _, server := range servers {
+		if a.mqttListener != nil && !a.mqttListener.IsGatewayOnline(server) {
+			log.Debug().Str("gateway", server).Msg("skip offline gateway for create room")
+			continue
+		}
+
+		if _, err := a.janusAdmin.MessagePlugin(server, "janus.plugin.videoroom", request); err != nil {
+			log.Error().Err(err).Str("gateway", server).Msg("create room on gateway failed")
+		}
+	}
 }
 
 func (a *App) AdminGetRoom(w http.ResponseWriter, r *http.Request) {

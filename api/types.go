@@ -32,6 +32,19 @@ type V2RoomServerResponse struct {
 	Janus string `json:"janus"`
 }
 
+// V2WebinarRoomServerRequest is the request for the webinar room_server endpoint.
+// Unlike the galaxy flow, the client doesn't know the room in advance - it only
+// provides its language, and the backend finds/creates a suitable room.
+type V2WebinarRoomServerRequest struct {
+	Language string                  `json:"language"`
+	Geo      *V2RoomServerRequestGeo `json:"geo,omitempty"`
+}
+
+type V2WebinarRoomServerResponse struct {
+	Janus string `json:"janus"`
+	Room  string `json:"room"` // Janus room ID (gateway_uid) of the assigned room
+}
+
 type V1User struct {
 	ID             string                 `json:"id"`
 	Display        string                 `json:"display"`

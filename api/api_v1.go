@@ -173,9 +173,10 @@ func (a *App) V1ListRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load dynamic assignments from room_server_assignments (Scale Mode)
+	// Load dynamic assignments from room_server_assignments (Scale Mode or Webinar Mode,
+	// both of which load balance rooms across servers via room_server_assignments).
 	assignments := make(map[string]string) // room_id -> gateway_name
-	if common.Config.ScaleMode {
+	if common.Config.ScaleMode || common.Config.Mode == common.ModeWebinar {
 		rows, err := a.DB.Query("SELECT room_id, gateway_name FROM room_server_assignments")
 		if err == nil {
 			defer rows.Close()
@@ -241,9 +242,9 @@ func (a *App) V1GetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check for dynamic assignment (Scale Mode)
+	// Check for dynamic assignment (Scale Mode or Webinar Mode)
 	var gateway *models.Gateway
-	if common.Config.ScaleMode {
+	if common.Config.ScaleMode || common.Config.Mode == common.ModeWebinar {
 		var gatewayName string
 		err := a.DB.QueryRow("SELECT gateway_name FROM room_server_assignments WHERE room_id = $1", room.GatewayUID).Scan(&gatewayName)
 		if err == nil {

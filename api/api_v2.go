@@ -7,15 +7,32 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	pkgerr "github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"github.com/volatiletech/sqlboiler/v4/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
+	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/httputil"
+	"github.com/Bnei-Baruch/gxydb-api/pkg/sqlutil"
 )
+
+// webinarLanguageRe validates the language token used to build webinar room
+// names. Restricting it to lowercase letters keeps room names predictable and
+// makes it safe to interpolate into the room-name regex used in SQL.
+var webinarLanguageRe = regexp.MustCompile(`^[a-z]+$`)
+
+// webinarUIDAllocLockKey is a fixed pg_advisory_xact_lock key used to serialize
+// gateway_uid allocation when creating webinar rooms. It is intentionally outside
+// the int4 range used by hashtext-based per-language locks so the two never collide.
+const webinarUIDAllocLockKey = int64(8123456789)
 
 func (a *App) V2GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := V2Config{
@@ -195,4 +212,197 @@ func (a *App) V2GetRoomServer(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondWithJSON(w, http.StatusOK, V2RoomServerResponse{
 		Janus: gatewayName,
 	})
+}
+
+// V2GetWebinarRoomServer is the webinar mode counterpart of V2GetRoomServer.
+// Instead of the client choosing the room, the client sends its language and the
+// backend finds (or auto-creates) a room "<language>-<n>" with free capacity,
+// then assigns a server using the same load balancing as galaxy scale mode.
+func (a *App) V2GetWebinarRoomServer(w http.ResponseWriter, r *http.Request) {
+	if common.Config.Mode != common.ModeWebinar {
+		httputil.NewBadRequestError(nil, "webinar mode is not enabled").Abort(w, r)
+		return
+	}
+
+	var req V2WebinarRoomServerRequest
+	if err := httputil.DecodeJSONBody(w, r, &req); err != nil {
+		err.Abort(w, r)
+		return
+	}
+
+	language := strings.ToLower(strings.TrimSpace(req.Language))
+	if !webinarLanguageRe.MatchString(language) {
+		httputil.NewBadRequestError(nil, "invalid or missing language").Abort(w, r)
+		return
+	}
+
+	countryCode := ""
+	if req.Geo != nil {
+		countryCode = req.Geo.CountryCode
+	}
+
+	// rooms.default_gateway_id is NOT NULL. In webinar mode the effective server
+	// is taken from room_server_assignments (load balanced), so this value is just
+	// a schema filler - pick the first available gateway.
+	defaultGatewayID, ok := a.firstAvailableGatewayID()
+	if !ok {
+		httputil.NewInternalError(pkgerr.New("no available janus gateways configured")).Abort(w, r)
+		return
+	}
+
+	var gatewayUID, roomName string
+	var isNew bool
+
+	// Find-or-create is serialized per language with a transaction scoped advisory
+	// lock, so concurrent requests for the same language don't create duplicate rooms.
+	//
+	// NOTE: room occupancy is measured from active sessions in the DB. A session is
+	// only created once the client actually joins the room (via MQTT events), so it
+	// lags behind this assignment. Under a burst of simultaneous requests for the
+	// same language, several users may therefore be packed into the same room beyond
+	// WEBINAR_USERS_COUNT. This is an accepted trade-off of DB-based counting.
+	err := sqlutil.InTx(r.Context(), a.DB, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(r.Context(),
+			"SELECT pg_advisory_xact_lock(hashtext($1))", "webinar:"+language); err != nil {
+			return pkgerr.Wrap(err, "advisory lock")
+		}
+
+		rows, err := tx.QueryContext(r.Context(), `
+			SELECT r.gateway_uid, r.name,
+			       (SELECT count(*) FROM sessions s WHERE s.room_id = r.gateway_uid AND s.removed_at IS NULL) AS cnt
+			FROM rooms r
+			WHERE r.disabled = false AND r.removed_at IS NULL AND r.name ~ ('^' || $1 || '-[0-9]+$')
+		`, language)
+		if err != nil {
+			return pkgerr.Wrap(err, "query webinar rooms")
+		}
+		defer rows.Close()
+
+		type webinarRoom struct {
+			uid   string
+			index int
+			count int
+		}
+		var candidates []webinarRoom
+		maxIndex := 0
+		for rows.Next() {
+			var uid, name string
+			var cnt int
+			if err := rows.Scan(&uid, &name, &cnt); err != nil {
+				return pkgerr.Wrap(err, "scan webinar room")
+			}
+			idx := webinarRoomIndex(name, language)
+			if idx <= 0 {
+				continue
+			}
+			if idx > maxIndex {
+				maxIndex = idx
+			}
+			candidates = append(candidates, webinarRoom{uid: uid, index: idx, count: cnt})
+		}
+		if err := rows.Err(); err != nil {
+			return pkgerr.Wrap(err, "iterate webinar rooms")
+		}
+
+		// reuse the lowest-index room still under capacity
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].index < candidates[j].index })
+		for _, c := range candidates {
+			if c.count < common.Config.WebinarUsersCount {
+				gatewayUID = c.uid
+				return nil
+			}
+		}
+
+		// no room with free capacity - create the next one: <language>-<maxIndex+1>
+		roomName = fmt.Sprintf("%s-%d", language, maxIndex+1)
+
+		// gateway_uid is globally unique and allocated as max+1 across ALL rooms.
+		// The per-language lock above doesn't guard this, so two different languages
+		// creating their first room concurrently could compute the same value and one
+		// INSERT would fail on the unique constraint. A dedicated lock around the
+		// allocation serializes only the create path (the reuse path never reaches it).
+		// Lock order is always (language -> allocation), so there's no deadlock.
+		if _, err := tx.ExecContext(r.Context(),
+			"SELECT pg_advisory_xact_lock($1)", webinarUIDAllocLockKey); err != nil {
+			return pkgerr.Wrap(err, "advisory lock (uid alloc)")
+		}
+
+		var newUID string
+		if err := tx.QueryRowContext(r.Context(),
+			"SELECT coalesce(max(gateway_uid::int) filter (where gateway_uid ~ '^[0-9]+$'), 0) + 1 FROM rooms",
+		).Scan(&newUID); err != nil {
+			return pkgerr.Wrap(err, "fetch max gateway_uid")
+		}
+
+		room := models.Room{
+			Name:             roomName,
+			DefaultGatewayID: defaultGatewayID,
+			GatewayUID:       newUID,
+			Disabled:         false,
+		}
+		if err := room.Insert(tx, boil.Whitelist("name", "default_gateway_id", "gateway_uid", "disabled")); err != nil {
+			return pkgerr.Wrap(err, "insert webinar room")
+		}
+
+		gatewayUID = newUID
+		isNew = true
+		return nil
+	})
+	if err != nil {
+		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		return
+	}
+
+	if isNew {
+		// create the room on all gateways and refresh the cache so the rest of the
+		// system (rooms listing, statistics, room_server) can see it.
+		a.createVideoRoomOnGateways(common.Config.AvailableJanusServers, gatewayUID, roomName)
+		if err := a.cache.rooms.Reload(a.DB); err != nil {
+			log.Error().Err(err).Msg("Reload rooms cache after webinar room create")
+		}
+	}
+
+	// assign (or stickily reuse) a server with the same load balancing as galaxy scale mode
+	gatewayName, err := a.roomServerAssignmentManager.GetOrAssignServer(r.Context(), gatewayUID, countryCode)
+	if err != nil {
+		httputil.NewInternalError(pkgerr.WithStack(err)).Abort(w, r)
+		return
+	}
+
+	log.Ctx(r.Context()).Info().
+		Str("language", language).
+		Str("room", gatewayUID).
+		Str("janus", gatewayName).
+		Bool("created", isNew).
+		Msg("V2GetWebinarRoomServer response")
+
+	httputil.RespondWithJSON(w, http.StatusOK, V2WebinarRoomServerResponse{
+		Janus: gatewayName,
+		Room:  gatewayUID,
+	})
+}
+
+// webinarRoomIndex extracts the numeric suffix N from a room named
+// "<language>-N". Returns 0 if the name doesn't match the expected shape.
+func webinarRoomIndex(name, language string) int {
+	prefix := language + "-"
+	if !strings.HasPrefix(name, prefix) {
+		return 0
+	}
+	idx, err := strconv.Atoi(name[len(prefix):])
+	if err != nil {
+		return 0
+	}
+	return idx
+}
+
+// firstAvailableGatewayID returns the ID of the first configured, online janus
+// (rooms) gateway found in the cache.
+func (a *App) firstAvailableGatewayID() (int64, bool) {
+	for _, name := range common.Config.AvailableJanusServers {
+		if g, ok := a.cache.gateways.ByName(name); ok && !g.Disabled && !g.RemovedAt.Valid {
+			return g.ID, true
+		}
+	}
+	return 0, false
 }

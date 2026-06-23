@@ -42,6 +42,8 @@ type config struct {
 	FailoverJanusServers  []string
 	FailoverWaitTime      time.Duration
 	StrJanusServers       []string            // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
+	Mode                  string              // application mode: "galaxy" (default) or "webinar"
+	WebinarUsersCount     int                 // max users (active sessions) per webinar room
 }
 
 func newConfig() *config {
@@ -77,6 +79,8 @@ func newConfig() *config {
 		FailoverJanusServers:  []string{},
 		FailoverWaitTime:      5 * time.Second,
 		StrJanusServers:       []string{},
+		Mode:                  ModeGalaxy,
+		WebinarUsersCount:     25,
 	}
 }
 
@@ -264,5 +268,15 @@ func Init() {
 	}
 	if val := os.Getenv("SCALE"); val != "" {
 		Config.ScaleMode = val == "true"
+	}
+	if val := os.Getenv("MODE"); val != "" {
+		Config.Mode = strings.ToLower(strings.TrimSpace(val))
+	}
+	if val := os.Getenv("WEBINAR_USERS_COUNT"); val != "" {
+		if pVal, err := strconv.Atoi(val); err != nil {
+			panic(fmt.Sprintf("invalid WEBINAR_USERS_COUNT: %s", val))
+		} else {
+			Config.WebinarUsersCount = pVal
+		}
 	}
 }

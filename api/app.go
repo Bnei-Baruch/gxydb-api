@@ -180,6 +180,7 @@ func (a *App) initRoutes() {
 	a.Router.HandleFunc("/v2/rooms_statistics", a.V2GetRoomsStatistics).Methods("GET") // Here due to more open permissions. otherwise might be under /admin/
 	a.Router.HandleFunc("/v2/vhinfo", a.V2GetVHInfo).Methods("GET")
 	a.Router.HandleFunc("/v2/room_server", a.V2GetRoomServer).Methods("POST")
+	a.Router.HandleFunc("/v2/room_server/webinar", a.V2GetWebinarRoomServer).Methods("POST") // webinar mode: language based room assignment
 
 	// admin
 	a.Router.HandleFunc("/admin/gateways", a.AdminListGateways).Methods("GET")
