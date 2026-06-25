@@ -9,78 +9,90 @@ import (
 )
 
 type config struct {
-	ListenAddress         string
-	DBUrl                 string
-	AccountsUrls          []string
-	SkipAuth              bool
-	SkipEventsAuth        bool
-	SkipPermissions       bool
-	IceServers            map[string][]string
-	ServicePasswords      []string
-	Secret                string
-	GatewayRoomsSecret    string
-	GatewayPluginAdminKey string
-	CollectPeriodicStats  bool
-	CleanSessionsInterval time.Duration
-	DeadSessionPeriod     time.Duration
-	DBMaxIdleConns        int
-	DBMaxOpenConns        int
-	DBConnMaxLifetime     time.Duration
-	DBConnMaxIdleTime     time.Duration
-	MQTTBrokerUrl         string
-	MQTTClientID          string
-	MQTTPassword          string
-	MQTTSecure            bool
-	VHUrl                 string
-	LogLevel              string // Log level: trace, debug, info, warn, error (default: info)
-	AvailableJanusServers []string
-	MaxServerCapacity     int
-	AvgRoomOccupancy      int
-	ServerRegions         map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
-	ServerRooms           map[string]string   // room (gateway_uid) -> pinned server name (e.g., "1234" -> "gxy5")
-	ScaleMode             bool                // if true - use load balancing, if false - use default gateway from room
-	FailoverJanusServers  []string
-	FailoverWaitTime      time.Duration
-	StrJanusServers       []string // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
-	Mode                  string   // application mode: "galaxy" (default) or "webinar"
-	WebinarUsersCount     int      // max users (active sessions) per webinar room
+	ListenAddress          string
+	DBUrl                  string
+	AccountsUrls           []string
+	SkipAuth               bool
+	SkipEventsAuth         bool
+	SkipPermissions        bool
+	IceServers             map[string][]string
+	ServicePasswords       []string
+	Secret                 string
+	GatewayRoomsSecret     string
+	GatewayPluginAdminKey  string
+	CollectPeriodicStats   bool
+	CleanSessionsInterval  time.Duration
+	DeadSessionPeriod      time.Duration
+	DBMaxIdleConns         int
+	DBMaxOpenConns         int
+	DBConnMaxLifetime      time.Duration
+	DBConnMaxIdleTime      time.Duration
+	MQTTBrokerUrl          string
+	MQTTClientID           string
+	MQTTPassword           string
+	MQTTSecure             bool
+	MQTTServiceTopic       string // subscribe: service protocol
+	MQTTEventsTopic        string // subscribe: gateway events
+	MQTTUsersTopic         string // subscribe: user/session updates
+	MQTTStatusTopic        string // subscribe: janus gateway status
+	MQTTAdminResponseTopic string // subscribe: janus admin responses
+	MQTTAdminRequestTopic  string // publish: janus admin requests (template with %s for server)
+	VHUrl                  string
+	LogLevel               string // Log level: trace, debug, info, warn, error (default: info)
+	AvailableJanusServers  []string
+	MaxServerCapacity      int
+	AvgRoomOccupancy       int
+	ServerRegions          map[string][]string // region -> list of servers (e.g., "IL" -> ["gxy1", "gxy2"])
+	ServerRooms            map[string]string   // room (gateway_uid) -> pinned server name (e.g., "1234" -> "gxy5")
+	ScaleMode              bool                // if true - use load balancing, if false - use default gateway from room
+	FailoverJanusServers   []string
+	FailoverWaitTime       time.Duration
+	StrJanusServers        []string // FIXME: Temporary - streaming servers monitoring should be in strdb, not gxydb-api
+	Mode                   string   // application mode: "galaxy" (default) or "webinar"
+	WebinarUsersCount      int      // max users (active sessions) per webinar room
 }
 
 func newConfig() *config {
 	return &config{
-		ListenAddress:         ":8081",
-		DBUrl:                 "postgres://user:password@localhost/galaxy?sslmode=disable",
-		AccountsUrls:          []string{"https://accounts.kab.info/auth/realms/main"},
-		SkipAuth:              false,
-		SkipEventsAuth:        false,
-		SkipPermissions:       false,
-		IceServers:            make(map[string][]string),
-		ServicePasswords:      make([]string, 0),
-		GatewayRoomsSecret:    "",
-		GatewayPluginAdminKey: "",
-		CollectPeriodicStats:  true,
-		CleanSessionsInterval: time.Minute,
-		DeadSessionPeriod:     90 * time.Second,
-		DBMaxIdleConns:        2,
-		DBMaxOpenConns:        0,
-		DBConnMaxLifetime:     0,
-		MQTTBrokerUrl:         "",
-		MQTTClientID:          "gxydb-api-dev",
-		MQTTPassword:          "",
-		MQTTSecure:            false,
-		VHUrl:                 "https://api.kli.one",
-		LogLevel:              "info", // default: info
-		AvailableJanusServers: []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
-		MaxServerCapacity:     400,
-		AvgRoomOccupancy:      10,
-		ServerRegions:         make(map[string][]string),
-		ServerRooms:           make(map[string]string),
-		ScaleMode:             false, // default: use room's default gateway (legacy mode)
-		FailoverJanusServers:  []string{},
-		FailoverWaitTime:      5 * time.Second,
-		StrJanusServers:       []string{},
-		Mode:                  ModeGalaxy,
-		WebinarUsersCount:     25,
+		ListenAddress:          ":8081",
+		DBUrl:                  "postgres://user:password@localhost/galaxy?sslmode=disable",
+		AccountsUrls:           []string{"https://accounts.kab.info/auth/realms/main"},
+		SkipAuth:               false,
+		SkipEventsAuth:         false,
+		SkipPermissions:        false,
+		IceServers:             make(map[string][]string),
+		ServicePasswords:       make([]string, 0),
+		GatewayRoomsSecret:     "",
+		GatewayPluginAdminKey:  "",
+		CollectPeriodicStats:   true,
+		CleanSessionsInterval:  time.Minute,
+		DeadSessionPeriod:      90 * time.Second,
+		DBMaxIdleConns:         2,
+		DBMaxOpenConns:         0,
+		DBConnMaxLifetime:      0,
+		MQTTBrokerUrl:          "",
+		MQTTClientID:           "gxydb-api-dev",
+		MQTTPassword:           "",
+		MQTTSecure:             false,
+		MQTTServiceTopic:       "galaxy/service/#",
+		MQTTEventsTopic:        "gxydb/events/#",
+		MQTTUsersTopic:         "gxydb/users/#",
+		MQTTStatusTopic:        "janus/+/status",
+		MQTTAdminResponseTopic: "janus/+/from-janus-admin",
+		MQTTAdminRequestTopic:  "janus/%s/to-janus-admin",
+		VHUrl:                  "https://api.kli.one",
+		LogLevel:               "info", // default: info
+		AvailableJanusServers:  []string{"gxy1", "gxy2", "gxy3", "gxy4", "gxy5", "gxy6", "gxy7", "gxy8", "gxy9", "gxy10", "gxy11", "gxy12"},
+		MaxServerCapacity:      400,
+		AvgRoomOccupancy:       10,
+		ServerRegions:          make(map[string][]string),
+		ServerRooms:            make(map[string]string),
+		ScaleMode:              false, // default: use room's default gateway (legacy mode)
+		FailoverJanusServers:   []string{},
+		FailoverWaitTime:       5 * time.Second,
+		StrJanusServers:        []string{},
+		Mode:                   ModeGalaxy,
+		WebinarUsersCount:      25,
 	}
 }
 
@@ -184,6 +196,24 @@ func Init() {
 	}
 	if val := os.Getenv("MQTT_SECURE"); val != "" {
 		Config.MQTTSecure = val == "true"
+	}
+	if val := os.Getenv("MQTT_TOPIC_SERVICE"); val != "" {
+		Config.MQTTServiceTopic = val
+	}
+	if val := os.Getenv("MQTT_TOPIC_EVENTS"); val != "" {
+		Config.MQTTEventsTopic = val
+	}
+	if val := os.Getenv("MQTT_TOPIC_USERS"); val != "" {
+		Config.MQTTUsersTopic = val
+	}
+	if val := os.Getenv("MQTT_TOPIC_STATUS"); val != "" {
+		Config.MQTTStatusTopic = val
+	}
+	if val := os.Getenv("MQTT_TOPIC_ADMIN_RESPONSE"); val != "" {
+		Config.MQTTAdminResponseTopic = val
+	}
+	if val := os.Getenv("MQTT_TOPIC_ADMIN_REQUEST"); val != "" {
+		Config.MQTTAdminRequestTopic = val
 	}
 	if val := os.Getenv("VH_URL"); val != "" {
 		Config.VHUrl = val

@@ -256,7 +256,7 @@ func (a *App) initMQTT() {
 			log.Fatal().Err(err).Msg("initialize mqtt listener")
 		}
 
-		a.janusAdmin = janus.NewMQTTAdminClient(a.mqttListener.Client(), common.Config.GatewayPluginAdminKey)
+		a.janusAdmin = janus.NewMQTTAdminClient(a.mqttListener.Client(), common.Config.GatewayPluginAdminKey, common.Config.MQTTAdminRequestTopic)
 		a.mqttListener.SetAdminClient(a.janusAdmin)
 
 		if a.roomServerAssignmentManager != nil {

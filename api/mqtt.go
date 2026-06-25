@@ -153,19 +153,19 @@ func (l *MQTTListener) Start() error {
 }
 
 func (l *MQTTListener) Subscribe(c mqtt.Client) {
-	if token := l.client.Subscribe("galaxy/service/#", byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
+	if token := l.client.Subscribe(common.Config.MQTTServiceTopic, byte(2), l.HandleServiceProtocol); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe galaxy/service")
 	}
 	// We use mqtt broker filter to pass only needed events, so we use qos 1 here
-	if token := l.client.Subscribe("gxydb/events/#", byte(1), l.HandleEvent); token.Wait() && token.Error() != nil {
+	if token := l.client.Subscribe(common.Config.MQTTEventsTopic, byte(1), l.HandleEvent); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe gxydb/events")
 	}
-	if token := l.client.Subscribe("gxydb/users/#", byte(1), l.UpdateSession); token.Wait() && token.Error() != nil {
+	if token := l.client.Subscribe(common.Config.MQTTUsersTopic, byte(1), l.UpdateSession); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Msg("mqtt.client Subscribe gxydb/users")
 	}
 
 	// Subscribe to Janus gateway status messages
-	statusTopic := "janus/+/status"
+	statusTopic := common.Config.MQTTStatusTopic
 	if token := l.client.Subscribe(statusTopic, byte(1), l.HandleGatewayStatus); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Str("topic", statusTopic).Msg("mqtt.client Subscribe status")
 	} else {
@@ -173,7 +173,7 @@ func (l *MQTTListener) Subscribe(c mqtt.Client) {
 	}
 
 	// Subscribe to Janus admin responses
-	adminTopic := "janus/+/from-janus-admin"
+	adminTopic := common.Config.MQTTAdminResponseTopic
 	if token := l.client.Subscribe(adminTopic, byte(1), l.HandleGatewayAdminResponse); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Str("topic", adminTopic).Msg("mqtt.client Subscribe admin")
 	} else {
@@ -285,7 +285,7 @@ func (l *MQTTListener) sendAdminMessagesToOnlineGateways() {
 
 		// Send admin request to all gateways, regardless of online status
 		// This ensures we get session counts even if status messages are not published
-		topic := fmt.Sprintf("janus/%s/to-janus-admin", name)
+		topic := fmt.Sprintf(common.Config.MQTTAdminRequestTopic, name)
 		l.SendAdminMessage(topic)
 		totalSent++
 		
@@ -328,14 +328,16 @@ type JanusStatusMessage struct {
 // HandleGatewayStatus processes status messages from Janus gateways (janus/{server}/status)
 func (l *MQTTListener) HandleGatewayStatus(c mqtt.Client, m mqtt.Message) {
 	go func() {
-		// Extract server name from topic: janus/{server}/status
+		// Extract server name: it's the segment right before the trailing suffix
+		// (e.g. ".../{server}/status"). Using the second-to-last segment keeps this
+		// working regardless of how many prefix segments the configured topic has.
 		parts := strings.Split(m.Topic(), "/")
 		if len(parts) < 2 {
 			log.Error().Str("topic", m.Topic()).Msg("HandleGatewayStatus: invalid topic format")
 			return
 		}
 
-		serverName := parts[1]
+		serverName := parts[len(parts)-2]
 
 		// Only process servers we're tracking
 		l.gatewayStatusesMu.RLock()
@@ -465,7 +467,7 @@ func (l *MQTTListener) HandleGatewayAdminResponse(c mqtt.Client, m mqtt.Message)
 			return
 		}
 
-		serverName := parts[1]
+		serverName := parts[len(parts)-2]
 		log.Debug().Str("topic", m.Topic()).Bytes("payload", m.Payload()).Msg("HandleGatewayAdminResponse")
 
 		var response JanusAdminResponse

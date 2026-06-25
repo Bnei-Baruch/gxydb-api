@@ -18,20 +18,24 @@ const defaultRequestTimeout = 10 * time.Second
 // Requests are published to janus/{server}/to-janus-admin,
 // responses are received from janus/{server}/from-janus-admin.
 type MQTTAdminClient struct {
-	client      mqtt.Client
-	adminSecret string
-	timeout     time.Duration
+	client       mqtt.Client
+	adminSecret  string
+	requestTopic string // template with a single %s for the server name
+	timeout      time.Duration
 
-	mu       sync.Mutex
-	pending  map[string]chan json.RawMessage
+	mu      sync.Mutex
+	pending map[string]chan json.RawMessage
 }
 
-func NewMQTTAdminClient(client mqtt.Client, adminSecret string) *MQTTAdminClient {
+// NewMQTTAdminClient builds an admin client. requestTopic is the publish topic
+// template (e.g. "janus/%s/to-janus-admin") where %s is the gateway/server name.
+func NewMQTTAdminClient(client mqtt.Client, adminSecret, requestTopic string) *MQTTAdminClient {
 	return &MQTTAdminClient{
-		client:      client,
-		adminSecret: adminSecret,
-		timeout:     defaultRequestTimeout,
-		pending:     make(map[string]chan json.RawMessage),
+		client:       client,
+		adminSecret:  adminSecret,
+		requestTopic: requestTopic,
+		timeout:      defaultRequestTimeout,
+		pending:      make(map[string]chan json.RawMessage),
 	}
 }
 
@@ -94,7 +98,7 @@ func (c *MQTTAdminClient) sendRequest(server string, payload map[string]interfac
 		return nil, fmt.Errorf("json.Marshal request: %w", err)
 	}
 
-	topic := fmt.Sprintf("janus/%s/to-janus-admin", server)
+	topic := fmt.Sprintf(c.requestTopic, server)
 
 	log.Debug().
 		Str("topic", topic).
@@ -197,7 +201,7 @@ func (c *MQTTAdminClient) ListSessions(server string) {
 		return
 	}
 
-	topic := fmt.Sprintf("janus/%s/to-janus-admin", server)
+	topic := fmt.Sprintf(c.requestTopic, server)
 	if token := c.client.Publish(topic, 1, false, b); token.Wait() && token.Error() != nil {
 		log.Error().Err(token.Error()).Str("topic", topic).Msg("MQTTAdminClient.ListSessions: publish error")
 	}
