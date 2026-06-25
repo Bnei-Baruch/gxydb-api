@@ -124,10 +124,7 @@ func (l *MQTTListener) Start() error {
 	if err != nil {
 		return pkgerr.Wrap(err, "url.Parse broker url")
 	}
-	var pwd string
-	if dc, ok := l.cache.dynamicConfig.ByKey(common.DynamicConfigMQTTAuth); ok {
-		pwd = dc.Value
-	}
+	pwd := common.Config.MQTTPassword
 	if pwd != "" {
 		if brokerURI.User != nil {
 			brokerURI.User = url.UserPassword(brokerURI.User.Username(), pwd)

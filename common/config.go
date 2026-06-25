@@ -179,7 +179,7 @@ func Init() {
 	if val := os.Getenv("MQTT_CLIENT_ID"); val != "" {
 		Config.MQTTClientID = val
 	}
-	if val := os.Getenv("MQTT_PASSWORD"); val != "" {
+	if val := os.Getenv("MQTT_CLIENT_PWD"); val != "" {
 		Config.MQTTPassword = val
 	}
 	if val := os.Getenv("MQTT_SECURE"); val != "" {
