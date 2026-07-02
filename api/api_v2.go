@@ -396,13 +396,22 @@ func webinarRoomIndex(name, language string) int {
 	return idx
 }
 
-// firstAvailableGatewayID returns the ID of the first configured, online janus
-// (rooms) gateway found in the cache.
+// firstAvailableGatewayID returns a gateway ID to use as the NOT NULL filler for
+// rooms.default_gateway_id (in webinar mode the effective server comes from
+// room_server_assignments, so the exact value here is not important).
+// It prefers a gateway listed in AVAILABLE_JANUS_SERVERS, and otherwise falls back
+// to any enabled rooms-type gateway in the cache.
 func (a *App) firstAvailableGatewayID() (int64, bool) {
 	for _, name := range common.Config.AvailableJanusServers {
 		if g, ok := a.cache.gateways.ByName(name); ok && !g.Disabled && !g.RemovedAt.Valid {
 			return g.ID, true
 		}
+	}
+	for _, g := range a.cache.gateways.Values() {
+		if g.Disabled || g.RemovedAt.Valid || g.Type != common.GatewayTypeRooms {
+			continue
+		}
+		return g.ID, true
 	}
 	return 0, false
 }

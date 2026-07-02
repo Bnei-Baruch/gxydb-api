@@ -11,11 +11,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/cors"
 	"github.com/rs/zerolog/log"
+	"github.com/volatiletech/sqlboiler/v4/boil"
 
 	"github.com/Bnei-Baruch/gxydb-api/common"
 	"github.com/Bnei-Baruch/gxydb-api/domain"
 	"github.com/Bnei-Baruch/gxydb-api/instrumentation"
 	"github.com/Bnei-Baruch/gxydb-api/middleware"
+	"github.com/Bnei-Baruch/gxydb-api/models"
 	"github.com/Bnei-Baruch/gxydb-api/pkg/janus"
 )
 
@@ -67,6 +69,9 @@ func (a *App) InitializeWithDeps(db common.DBInterface, tokenVerifier middleware
 
 	a.initRoutes()
 	a.initCache()
+	if common.Config.Mode == common.ModeWebinar {
+		a.ensureWebinarGateways()
+	}
 	a.initRoomsStatistics()
 	a.initRoomServerAssignments()
 	a.initSessionManagement()
@@ -239,6 +244,51 @@ func (a *App) initRoomServerAssignments() {
 		common.Config.AvgRoomOccupancy,
 		common.Config.ServerRegions,
 	)
+}
+
+// ensureWebinarGateways makes sure every server listed in AVAILABLE_JANUS_SERVERS
+// has a gateways row (type=rooms). In webinar mode the janus servers are configured
+// purely via env; this materializes them in the table so rooms.default_gateway_id
+// (NOT NULL FK to gateways) can be satisfied without maintaining the table by hand.
+// Missing rows are created with empty url/admin fields - webinar talks to gateways
+// over MQTT by name, and /v2/config is not used by webinar clients.
+func (a *App) ensureWebinarGateways() {
+	created := 0
+	for _, name := range common.Config.AvailableJanusServers {
+		if _, ok := a.cache.gateways.ByName(name); ok {
+			continue
+		}
+		exists, err := models.Gateways(models.GatewayWhere.Name.EQ(name)).Exists(a.DB)
+		if err != nil {
+			log.Error().Err(err).Str("gateway", name).Msg("ensureWebinarGateways: exists check failed")
+			continue
+		}
+		if exists {
+			continue
+		}
+
+		gw := &models.Gateway{
+			Name:           name,
+			URL:            "",
+			AdminURL:       "",
+			AdminPassword:  "",
+			EventsPassword: "",
+			Type:           common.GatewayTypeRooms,
+			Disabled:       false,
+		}
+		if err := gw.Insert(a.DB, boil.Infer()); err != nil {
+			log.Error().Err(err).Str("gateway", name).Msg("ensureWebinarGateways: insert failed")
+			continue
+		}
+		created++
+		log.Info().Str("gateway", name).Msg("ensureWebinarGateways: created gateway from env")
+	}
+
+	if created > 0 {
+		if err := a.cache.gateways.Reload(a.DB); err != nil {
+			log.Error().Err(err).Msg("ensureWebinarGateways: reload gateway cache")
+		}
+	}
 }
 
 func (a *App) initInstrumentation() {
