@@ -29,11 +29,6 @@ import (
 // makes it safe to interpolate into the room-name regex used in SQL.
 var webinarLanguageRe = regexp.MustCompile(`^[a-z]+$`)
 
-// webinarUIDAllocLockKey is a fixed pg_advisory_xact_lock key used to serialize
-// gateway_uid allocation when creating webinar rooms. It is intentionally outside
-// the int4 range used by hashtext-based per-language locks so the two never collide.
-const webinarUIDAllocLockKey = int64(8123456789)
-
 func (a *App) V2GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := V2Config{
 		Gateways:      make(map[string]map[string]*V2Gateway),
@@ -313,38 +308,24 @@ func (a *App) V2GetWebinarRoomServer(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// no room with free capacity - create the next one: <language>-<maxIndex+1>
+		// no room with free capacity - create the next one: <language>-<maxIndex+1>.
+		// The Janus room ID (gateway_uid) IS the room name, e.g. "hebrew-1" (string
+		// room IDs are supported after the janus_string_room_id migration). The
+		// per-language advisory lock above guarantees the name is unique, so no
+		// separate uid allocation / global lock is needed.
 		roomName = fmt.Sprintf("%s-%d", language, maxIndex+1)
-
-		// gateway_uid is globally unique and allocated as max+1 across ALL rooms.
-		// The per-language lock above doesn't guard this, so two different languages
-		// creating their first room concurrently could compute the same value and one
-		// INSERT would fail on the unique constraint. A dedicated lock around the
-		// allocation serializes only the create path (the reuse path never reaches it).
-		// Lock order is always (language -> allocation), so there's no deadlock.
-		if _, err := tx.ExecContext(r.Context(),
-			"SELECT pg_advisory_xact_lock($1)", webinarUIDAllocLockKey); err != nil {
-			return pkgerr.Wrap(err, "advisory lock (uid alloc)")
-		}
-
-		var newUID string
-		if err := tx.QueryRowContext(r.Context(),
-			"SELECT coalesce(max(gateway_uid::int) filter (where gateway_uid ~ '^[0-9]+$'), 0) + 1 FROM rooms",
-		).Scan(&newUID); err != nil {
-			return pkgerr.Wrap(err, "fetch max gateway_uid")
-		}
 
 		room := models.Room{
 			Name:             roomName,
 			DefaultGatewayID: defaultGatewayID,
-			GatewayUID:       newUID,
+			GatewayUID:       roomName,
 			Disabled:         false,
 		}
 		if err := room.Insert(tx, boil.Whitelist("name", "default_gateway_id", "gateway_uid", "disabled")); err != nil {
 			return pkgerr.Wrap(err, "insert webinar room")
 		}
 
-		gatewayUID = newUID
+		gatewayUID = roomName
 		isNew = true
 		return nil
 	})
